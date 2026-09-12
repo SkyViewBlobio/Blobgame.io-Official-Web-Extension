@@ -2,13 +2,13 @@ export const BETA_GITHUB_TOKEN_KEY = 'blobio.beta.githubToken';
 
 const PUBLIC_REPO = {
   owner: 'SkyViewBlobio',
-  name: 'Blobgame.io-Official-Web-Extension-',
+  name: 'Blobgame.io-Official-Web-Extension',
   ref: 'main',
 };
 
 const BETA_REPO = {
   owner: 'SkyViewBlobio',
-  name: 'Blobgame.io-Official-Web-Extension-',
+  name: 'Blobgame.io-Official-Web-Extension',
   ref: 'main',
 };
 

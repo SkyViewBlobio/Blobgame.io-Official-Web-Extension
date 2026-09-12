@@ -4,7 +4,7 @@
 
 The official Blobgame.io client-side browser extension for [Blobgame.io](https://blobgame.io/) and its [custom game client](http://custom.client.blobgame.io/).
 
-**Official repository:** [SkyViewBlobio/Blobgame.io-Official-Web-Extension-](https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-)
+**Official repository:** [SkyViewBlobio/Blobgame.io-Official-Web-Extension](https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension)
 
 ## Features
 
@@ -28,13 +28,13 @@ Use this repository as the official save baseline if you want to customize your 
 ## Install this release
 
 1. Install Tampermonkey in your browser.
-2. Open the [public release installer](https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/main/loader/blobio-loader.user.js) and confirm installation in Tampermonkey. If it opens as plain text, copy the contents into a new Tampermonkey script and save it.
+2. Open the [public release installer](https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/loader/blobio-loader.user.js) and confirm installation in Tampermonkey. If it opens as plain text, copy the contents into a new Tampermonkey script and save it.
 3. Disable any older Blobio extension loader to avoid running multiple versions together.
 4. Open Blobgame.io and reload the page.
 
 **No GitHub token is required.** The public loader fetches the extension bundle and role data from this repository's `main` branch. It checks for updates when loaded. Reinstall the loader when a release changes its embedded game hooks, then reload the game.
 
-The release watermark reads **Blob Extension v0.2.85-Release**.
+The release watermark reads **Blob Extension v0.2.86-Release**.
 
 ## Support and community
 

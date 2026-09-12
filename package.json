@@ -1,13 +1,13 @@
 {
   "name": "blobio-web-script",
-  "version": "0.2.85",
+  "version": "0.2.86",
   "private": true,
   "author": "SkyView",
   "license": "MIT",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-.git"
+    "url": "https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension.git"
   },
   "scripts": {
     "build": "node scripts/build.js --channel=public",

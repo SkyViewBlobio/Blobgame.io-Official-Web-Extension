@@ -236,8 +236,8 @@ function buildUserscriptHeader(channel, version) {
     lines.push(
       '// @connect      cdn.jsdelivr.net',
       '// @connect      raw.githubusercontent.com',
-      '// @downloadURL  https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/main/loader/blobio-loader.user.js',
-      '// @updateURL    https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/main/loader/blobio-loader.user.js',
+      '// @downloadURL  https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/loader/blobio-loader.user.js',
+      '// @updateURL    https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/loader/blobio-loader.user.js',
     );
   }
 

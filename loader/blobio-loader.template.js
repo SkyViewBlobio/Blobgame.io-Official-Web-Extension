@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blobio Web Script Loader
 // @namespace    https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-
-// @version      0.2.85
+// @version      0.2.86
 // @author       SkyView
 // @description  Loads the Blobio extension bundle from GitHub.
 // @match        *://blobgame.io/*
@@ -24,15 +24,15 @@
 // @grant        GM_removeValueChangeListener
 // @connect      cdn.jsdelivr.net
 // @connect      raw.githubusercontent.com
-// @downloadURL  https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/main/loader/blobio-loader.user.js
-// @updateURL    https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/main/loader/blobio-loader.user.js
+// @downloadURL  https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/loader/blobio-loader.user.js
+// @updateURL    https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/loader/blobio-loader.user.js
 // ==/UserScript==
 
 (() => {
   'use strict';
 
   const LOG_PREFIX = '[Blobio]';
-  const VERSION = '0.2.85';
+  const VERSION = '0.2.86';
   const CUSTOM_CLIENT_HOST = 'custom.client.blobgame.io';
   const CAPTCHA_LOGO_HIDDEN_KEY = 'blobio.chat.hideCaptchaLogo';
   const RECAPTCHA_FRAME_HOSTS = new Set(['www.google.com', 'www.recaptcha.net']);
@@ -137,7 +137,7 @@
   const CELL_PAUSE_RUNTIME_KEY = '__blobioCellPauseRuntime';
   const CELL_PAUSE_STATE_KEY = '__blobioCellPauseState';
   const CELL_PAUSE_MOVEMENT_GATE_KEY = '__blobioCellPauseMovementGateInstalled';
-  const CELL_PAUSE_RUNTIME_VERSION = '0.2.85';
+  const CELL_PAUSE_RUNTIME_VERSION = '0.2.86';
 
   function isRecaptchaAnchorFrame() {
     return RECAPTCHA_FRAME_HOSTS.has(location.hostname)
@@ -264,18 +264,18 @@
     channel: 'public',
     repo: {
       owner: 'SkyViewBlobio',
-      name: 'Blobgame.io-Official-Web-Extension-',
+      name: 'Blobgame.io-Official-Web-Extension',
       ref: 'main',
     },
     githubTokenKey: '',
     bundleUrls: [
-      `https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/main/dist/blobio-extension.bundle.js?v=${VERSION}`,
-      `https://cdn.jsdelivr.net/gh/SkyViewBlobio/Blobgame.io-Official-Web-Extension-@main/dist/blobio-extension.bundle.js?v=${VERSION}`,
+      `https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/dist/blobio-extension.bundle.js?v=${VERSION}`,
+      `https://cdn.jsdelivr.net/gh/SkyViewBlobio/Blobgame.io-Official-Web-Extension@main/dist/blobio-extension.bundle.js?v=${VERSION}`,
     ],
     roles: {
-      vip: 'https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/main/data/roles/vip.json',
-      admins: 'https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/main/data/roles/admins.json',
-      clans: 'https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/main/data/roles/clans.json',
+      vip: 'https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/data/roles/vip.json',
+      admins: 'https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/data/roles/admins.json',
+      clans: 'https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/data/roles/clans.json',
     },
   };
   /* REMOTE_FILE_CONFIG_END */

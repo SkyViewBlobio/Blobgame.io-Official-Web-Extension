@@ -60,7 +60,7 @@ import { pageVirusMotherCellBootstrap } from './virus/pageVirusMotherCellBootstr
 import { pageRenderPerformanceBootstrap } from './performance/pageRenderPerformanceBootstrap.js';
 
 const INSTANCE_KEY = '__blobioExtension';
-const EXTENSION_VERSION = '0.2.85';
+const EXTENSION_VERSION = '0.2.86';
 const VIP_BADGE_URL = vipBadgeUrl;
 const EMOTE_SKIN_ASSETS = {
   cool: emoteCoolUrl,

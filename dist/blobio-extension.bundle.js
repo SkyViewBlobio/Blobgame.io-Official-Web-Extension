@@ -5177,12 +5177,12 @@
   var BETA_GITHUB_TOKEN_KEY = "blobio.beta.githubToken";
   var PUBLIC_REPO = {
     owner: "SkyViewBlobio",
-    name: "Blobgame.io-Official-Web-Extension-",
+    name: "Blobgame.io-Official-Web-Extension",
     ref: "main"
   };
   var BETA_REPO = {
     owner: "SkyViewBlobio",
-    name: "Blobgame.io-Official-Web-Extension-",
+    name: "Blobgame.io-Official-Web-Extension",
     ref: "main"
   };
   function rawGitHubUrl(repo, path, version = "") {
@@ -21540,7 +21540,7 @@ html.${className} .blobio-watermark-extension::after {
   var DEFAULT_CLASS_NAME2 = "blobio-menu-enabled";
   var DEFAULT_STYLE_ID2 = "blobio-menu-style";
   var DEFAULT_TOOLBAR_CLASS = "blobio-menu-toolbar";
-  var DEFAULT_EXTENSION_VERSION = "0.2.85";
+  var DEFAULT_EXTENSION_VERSION = "0.2.86";
   var HIDDEN_CLASS = "blobio-original-hidden";
   var WATERMARK_STORAGE_KEY = "blobio.watermark.enabled";
   var WATERMARK_RIGHT_NUDGE = 60;
@@ -27297,7 +27297,7 @@ ${buildJellyGlsl(settings.noSkinCells)}`);
     }
   }
   var INSTANCE_KEY = "__blobioExtension";
-  var EXTENSION_VERSION = "0.2.85";
+  var EXTENSION_VERSION = "0.2.86";
   var VIP_BADGE_URL = VIP_icon_plus_default;
   var EMOTE_SKIN_ASSETS = {
     cool: emote_cool_default,

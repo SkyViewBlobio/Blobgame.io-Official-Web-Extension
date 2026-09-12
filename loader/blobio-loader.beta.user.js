@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blobio Web Script Loader BETA
 // @namespace    https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-
-// @version      0.2.85
+// @version      0.2.86
 // @author       SkyView
 // @description  Loads the private Blobio beta extension bundle from GitHub.
 // @match        *://blobgame.io/*
@@ -30,7 +30,7 @@
   'use strict';
 
   const LOG_PREFIX = '[Blobio]';
-  const VERSION = '0.2.85';
+  const VERSION = '0.2.86';
   const CUSTOM_CLIENT_HOST = 'custom.client.blobgame.io';
   const CAPTCHA_LOGO_HIDDEN_KEY = 'blobio.chat.hideCaptchaLogo';
   const RECAPTCHA_FRAME_HOSTS = new Set(['www.google.com', 'www.recaptcha.net']);
@@ -149,7 +149,7 @@
   const CELL_PAUSE_RUNTIME_KEY = '__blobioCellPauseRuntime';
   const CELL_PAUSE_STATE_KEY = '__blobioCellPauseState';
   const CELL_PAUSE_MOVEMENT_GATE_KEY = '__blobioCellPauseMovementGateInstalled';
-  const CELL_PAUSE_RUNTIME_VERSION = '0.2.85';
+  const CELL_PAUSE_RUNTIME_VERSION = '0.2.86';
 
   function isRecaptchaAnchorFrame() {
     return RECAPTCHA_FRAME_HOSTS.has(location.hostname)
@@ -276,17 +276,17 @@
     channel: "beta",
     repo: {
       owner: "SkyViewBlobio",
-      name: "Blobgame.io-Official-Web-Extension-",
+      name: "Blobgame.io-Official-Web-Extension",
       ref: "main",
     },
     githubTokenKey: "blobio.beta.githubToken",
     bundleUrls: [
-      "https://api.github.com/repos/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/contents/dist/blobio-extension.bundle.js?ref=main",
+      "https://api.github.com/repos/SkyViewBlobio/Blobgame.io-Official-Web-Extension/contents/dist/blobio-extension.bundle.js?ref=main",
     ],
     roles: {
-      vip: "https://api.github.com/repos/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/contents/data/roles/vip.json?ref=main",
-      admins: "https://api.github.com/repos/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/contents/data/roles/admins.json?ref=main",
-      clans: "https://api.github.com/repos/SkyViewBlobio/Blobgame.io-Official-Web-Extension-/contents/data/roles/clans.json?ref=main",
+      vip: "https://api.github.com/repos/SkyViewBlobio/Blobgame.io-Official-Web-Extension/contents/data/roles/vip.json?ref=main",
+      admins: "https://api.github.com/repos/SkyViewBlobio/Blobgame.io-Official-Web-Extension/contents/data/roles/admins.json?ref=main",
+      clans: "https://api.github.com/repos/SkyViewBlobio/Blobgame.io-Official-Web-Extension/contents/data/roles/clans.json?ref=main",
     },
   };
   /* REMOTE_FILE_CONFIG_END */
