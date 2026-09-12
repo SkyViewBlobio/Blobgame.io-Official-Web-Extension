@@ -5555,15 +5555,11 @@
   }
   function requestText(document, url, timeout = 15e3, remoteConfig = getRuntimeRemoteConfig(document)) {
     const win = getWindow2(document);
-    const bridge = remoteConfig?.channel === "beta" ? getRemoteTextBridge(document) : null;
+    const bridge = getRemoteTextBridge(document);
     if (bridge) {
       return bridge(url, timeout);
     }
-    const headers = {
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-      ...getRemoteRequestHeaders(remoteConfig, url, readGitHubToken(document, remoteConfig))
-    };
+    const headers = getRemoteRequestHeaders(remoteConfig, url, readGitHubToken(document, remoteConfig));
     const gmRequest = win?.GM_xmlhttpRequest || globalThis.GM_xmlhttpRequest;
     if (typeof gmRequest === "function") {
       return new Promise((resolve, reject) => {
@@ -5649,7 +5645,7 @@
       if (cachedVip || cachedAdmins || cachedClans) {
         this.notify("cache");
       }
-      this.readyPromise = Promise.allSettled([
+      this.readyPromise = Promise.all([
         this.refreshVip(),
         this.refreshAdmins(),
         this.refreshClans()

@@ -265,16 +265,13 @@ function getRemoteTextBridge(document) {
 
 function requestText(document, url, timeout = 15000, remoteConfig = getRuntimeRemoteConfig(document)) {
   const win = getWindow(document);
-  const bridge = remoteConfig?.channel === 'beta' ? getRemoteTextBridge(document) : null;
+  const bridge = getRemoteTextBridge(document);
   if (bridge) {
     return bridge(url, timeout);
   }
 
-  const headers = {
-    'Cache-Control': 'no-cache',
-    Pragma: 'no-cache',
-    ...getRemoteRequestHeaders(remoteConfig, url, readGitHubToken(document, remoteConfig)),
-  };
+  // The URL already has a cache buster; extra cache headers force a CORS preflight.
+  const headers = getRemoteRequestHeaders(remoteConfig, url, readGitHubToken(document, remoteConfig));
   const gmRequest = win?.GM_xmlhttpRequest || globalThis.GM_xmlhttpRequest;
 
   if (typeof gmRequest === 'function') {
@@ -369,7 +366,8 @@ export class RoleRegistry {
       this.notify('cache');
     }
 
-    this.readyPromise = Promise.allSettled([
+    // Each refresh catches its own failures. The page's Promise polyfill may lack allSettled.
+    this.readyPromise = Promise.all([
       this.refreshVip(),
       this.refreshAdmins(),
       this.refreshClans(),
