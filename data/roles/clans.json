@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-02T00:00:00Z",
+  "clans": [
+    {
+      "clantag": "BlobioCLAN",
+      "clanLeaderUID": "889",
+      "clanTagUIDs": ["889"]
+    },
+    {
+      "clantag": "TestCLAN",
+      "clanLeaderUID": "944725",
+      "clanTagUIDs": ["944725"]
+    }
+  ]
+}

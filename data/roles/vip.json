@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-09-12T00:00:00Z",
+  "members": {
+    "116215": {
+      "expiresAt": "UNLIMITED"
+    },
+    "1189715": {
+      "name": "Pulse",
+      "expiresAt": "UNLIMITED"
+    },
+    "97415": {
+      "name": "Mikhail",
+      "expiresAt": "UNLIMITED"
+    },
+    "777": {
+      "name": "Foris",
+      "expiresAt": "UNLIMITED"
+    },
+    "174210": {
+      "name": "EvilMask",
+      "expiresAt": "2029-07-13T22:35:57Z"
+    },
+    "1043025": {
+      "name": "Devin",
+      "expiresAt": "2029-07-13T22:35:57Z"
+    },
+    "1029317": {
+      "name": "Sam-tester",
+      "expiresAt": "2029-07-13T22:35:57Z"
+    },
+    "1347673": {
+      "name": "test",
+      "expiresAt": "2029-07-13T22:35:57Z"
+    },
+    "517968": {
+      "name": "Oktan",
+      "expiresAt": "2029-07-13T22:35:57Z"
+    },
+    "944725": {
+      "name": "Sky",
+      "expiresAt": "2029-07-13T22:35:57Z"
+    },
+    "889": {
+      "name": "Sky",
+      "expiresAt": "UNLIMITED"
+    }
+  }
+}
