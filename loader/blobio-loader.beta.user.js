@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blobio Web Script Loader BETA
 // @namespace    https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-
-// @version      0.2.86
+// @version      0.2.87
 // @author       SkyView
 // @description  Loads the private Blobio beta extension bundle from GitHub.
 // @match        *://blobgame.io/*
@@ -30,7 +30,7 @@
   'use strict';
 
   const LOG_PREFIX = '[Blobio]';
-  const VERSION = '0.2.86';
+  const VERSION = '0.2.87';
   const CUSTOM_CLIENT_HOST = 'custom.client.blobgame.io';
   const CAPTCHA_LOGO_HIDDEN_KEY = 'blobio.chat.hideCaptchaLogo';
   const RECAPTCHA_FRAME_HOSTS = new Set(['www.google.com', 'www.recaptcha.net']);
@@ -149,7 +149,7 @@
   const CELL_PAUSE_RUNTIME_KEY = '__blobioCellPauseRuntime';
   const CELL_PAUSE_STATE_KEY = '__blobioCellPauseState';
   const CELL_PAUSE_MOVEMENT_GATE_KEY = '__blobioCellPauseMovementGateInstalled';
-  const CELL_PAUSE_RUNTIME_VERSION = '0.2.86';
+  const CELL_PAUSE_RUNTIME_VERSION = '0.2.87';
 
   function isRecaptchaAnchorFrame() {
     return RECAPTCHA_FRAME_HOSTS.has(location.hostname)
@@ -7402,7 +7402,7 @@
   /* CELL_MASS_RUNTIME_START */
   function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalThis) {
     const win = pageWindow || globalThis;
-    const SCRIPT_VERSION = '0.1.38';
+    const SCRIPT_VERSION = '0.1.39';
     const host = String(win.location?.hostname || '').toLowerCase();
     if (host && host !== 'custom.client.blobgame.io' && host !== 'blobgame.io') {
       return false;
@@ -8787,11 +8787,31 @@
       activeGameSocket = socket;
       playerUidState.socketFound = true;
       playerUidState.lastSocketSource = source;
+      installSocketSendUidHook(socket);
       installSocketMessageUidResponseHook(socket);
       if (changed) {
         state.playerUidMap = describePlayerUidState();
       }
       flushUidLookupQueue(Date.now());
+    }
+
+    function installSocketSendUidHook(socket) {
+      if (typeof socket.send !== 'function' || socket.send.__blobioClanUidSocketPatchVersion === SCRIPT_VERSION) {
+        return;
+      }
+      // The game creates its socket in an iframe, outside the page's WebSocket prototype.
+      const previous = socket.send.__blobioClanUidSocketOriginal || socket.send;
+      const wrapped = function blobioClanUidGameSocketSend(data) {
+        const result = previous.apply(this, arguments);
+        const playerId = readUidLookupRequestPlayerId(data);
+        if (playerId) {
+          rememberUidResponseOrigin('manual', playerId);
+        }
+        return result;
+      };
+      wrapped.__blobioClanUidSocketPatchVersion = SCRIPT_VERSION;
+      wrapped.__blobioClanUidSocketOriginal = previous;
+      socket.send = wrapped;
     }
 
     function queuePlayerUidLookup(playerId, playerName) {
@@ -8964,9 +8984,6 @@
     function handleSocketUidResponse(accountId) {
       expireUidLookupState(Date.now());
       const uid = normalizeUid(accountId);
-      if (!uid) {
-        return false;
-      }
 
       const origin = uidResponseOrigins[0];
       if (origin?.type === 'manual') {
@@ -9147,7 +9164,8 @@
 
       try {
         const view = new DataView(bytes.buffer, bytes.byteOffset + 1, 4);
-        return normalizeUid(view.getInt32(0, true));
+        // UID zero is a completed lookup for an account-less cell, not a missing reply.
+        return String(view.getInt32(0, true));
       } catch {
         return '';
       }
@@ -9161,6 +9179,7 @@
       if (
         (typeof ArrayBuffer !== 'undefined' && data instanceof ArrayBuffer)
         || (typeof win.ArrayBuffer === 'function' && data instanceof win.ArrayBuffer)
+        || Object.prototype.toString.call(data) === '[object ArrayBuffer]'
       ) {
         return new Uint8Array(data);
       }

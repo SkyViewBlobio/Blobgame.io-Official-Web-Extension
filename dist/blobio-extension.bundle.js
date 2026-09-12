@@ -138,7 +138,7 @@
   }
   function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalThis) {
     const win = pageWindow || globalThis;
-    const SCRIPT_VERSION = "0.1.38";
+    const SCRIPT_VERSION = "0.1.39";
     const host = String(win.location?.hostname || "").toLowerCase();
     if (host && host !== "custom.client.blobgame.io" && host !== "blobgame.io") {
       return false;
@@ -1329,11 +1329,29 @@
       activeGameSocket = socket;
       playerUidState.socketFound = true;
       playerUidState.lastSocketSource = source;
+      installSocketSendUidHook(socket);
       installSocketMessageUidResponseHook(socket);
       if (changed) {
         state.playerUidMap = describePlayerUidState();
       }
       flushUidLookupQueue(Date.now());
+    }
+    function installSocketSendUidHook(socket) {
+      if (typeof socket.send !== "function" || socket.send.__blobioClanUidSocketPatchVersion === SCRIPT_VERSION) {
+        return;
+      }
+      const previous = socket.send.__blobioClanUidSocketOriginal || socket.send;
+      const wrapped = function blobioClanUidGameSocketSend(data) {
+        const result = previous.apply(this, arguments);
+        const playerId = readUidLookupRequestPlayerId(data);
+        if (playerId) {
+          rememberUidResponseOrigin("manual", playerId);
+        }
+        return result;
+      };
+      wrapped.__blobioClanUidSocketPatchVersion = SCRIPT_VERSION;
+      wrapped.__blobioClanUidSocketOriginal = previous;
+      socket.send = wrapped;
     }
     function queuePlayerUidLookup(playerId, playerName) {
       const normalizedPlayerId = normalizeUid2(playerId);
@@ -1480,9 +1498,6 @@
     function handleSocketUidResponse(accountId) {
       expireUidLookupState(Date.now());
       const uid = normalizeUid2(accountId);
-      if (!uid) {
-        return false;
-      }
       const origin = uidResponseOrigins[0];
       if (origin?.type === "manual") {
         return false;
@@ -1641,7 +1656,7 @@
       }
       try {
         const view = new DataView(bytes.buffer, bytes.byteOffset + 1, 4);
-        return normalizeUid2(view.getInt32(0, true));
+        return String(view.getInt32(0, true));
       } catch {
         return "";
       }
@@ -1650,7 +1665,7 @@
       if (!data) {
         return null;
       }
-      if (typeof ArrayBuffer !== "undefined" && data instanceof ArrayBuffer || typeof win.ArrayBuffer === "function" && data instanceof win.ArrayBuffer) {
+      if (typeof ArrayBuffer !== "undefined" && data instanceof ArrayBuffer || typeof win.ArrayBuffer === "function" && data instanceof win.ArrayBuffer || Object.prototype.toString.call(data) === "[object ArrayBuffer]") {
         return new Uint8Array(data);
       }
       if (typeof ArrayBuffer !== "undefined" && typeof ArrayBuffer.isView === "function" && ArrayBuffer.isView(data)) {
@@ -21540,7 +21555,7 @@ html.${className} .blobio-watermark-extension::after {
   var DEFAULT_CLASS_NAME2 = "blobio-menu-enabled";
   var DEFAULT_STYLE_ID2 = "blobio-menu-style";
   var DEFAULT_TOOLBAR_CLASS = "blobio-menu-toolbar";
-  var DEFAULT_EXTENSION_VERSION = "0.2.86";
+  var DEFAULT_EXTENSION_VERSION = "0.2.87";
   var HIDDEN_CLASS = "blobio-original-hidden";
   var WATERMARK_STORAGE_KEY = "blobio.watermark.enabled";
   var WATERMARK_RIGHT_NUDGE = 60;
@@ -27297,7 +27312,7 @@ ${buildJellyGlsl(settings.noSkinCells)}`);
     }
   }
   var INSTANCE_KEY = "__blobioExtension";
-  var EXTENSION_VERSION = "0.2.86";
+  var EXTENSION_VERSION = "0.2.87";
   var VIP_BADGE_URL = VIP_icon_plus_default;
   var EMOTE_SKIN_ASSETS = {
     cool: emote_cool_default,
