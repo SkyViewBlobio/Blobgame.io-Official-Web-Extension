@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-09-12T00:00:00Z",
+  "updatedAt": "2026-09-12T16:12:24Z",
   "members": {
     "116215": true,
     "1189715": true,
@@ -10,6 +10,7 @@
     "889": true
   },
   "memberNames": {
+    "116215": "Horizon",
     "1189715": "Pulse",
     "97415": "Mikhail",
     "777": "Foris",
