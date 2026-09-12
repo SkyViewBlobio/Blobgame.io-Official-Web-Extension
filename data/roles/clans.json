@@ -1,16 +1,38 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-02T00:00:00Z",
+  "updatedAt": "2026-09-12T22:00:00Z",
   "clans": [
+    {
+      "clantag": "をAim",
+      "clanLeaderUID": "1298230",
+      "clanTagUIDs": [
+        "1298230",
+        "960636"
+      ]
+    },
+    {
+      "clantag": "Wash3d",
+      "clanLeaderUID": "1347025",
+      "clanTagUIDs": [
+        "1347025",
+        "1357881",
+        "1225168",
+        "167427"
+      ]
+    },
     {
       "clantag": "BlobioCLAN",
       "clanLeaderUID": "889",
-      "clanTagUIDs": ["889"]
+      "clanTagUIDs": [
+        "889"
+      ]
     },
     {
       "clantag": "TestCLAN",
       "clanLeaderUID": "944725",
-      "clanTagUIDs": ["944725"]
+      "clanTagUIDs": [
+        "944725"
+      ]
     }
   ]
 }
