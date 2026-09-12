@@ -23,7 +23,7 @@ Please label modified builds clearly so users can distinguish them from SkyView'
 
 This repository contains the official extension maintained by the official Blobio developers. Builds from other users or repositories may contain different behavior or code that has not been reviewed here. Using a modified build may put your Blobgame.io account at risk of restrictions, bans, or deletion, and malicious modifications could expose private data.
 
-Use this repository as the official save baseline if you want to customize your game safely without risking your account or data.
+Use this repository as the official safe baseline if you want to customize your game safely without risking your account or data.
 
 ## Install this release
 
