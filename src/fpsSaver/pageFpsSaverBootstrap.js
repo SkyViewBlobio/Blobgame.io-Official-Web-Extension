@@ -22,7 +22,7 @@ const FPS_SAVER_DEFAULT_SETTINGS = {
   foodCulling: true,
   foodLimit: 90,
   massCulling: true,
-  massLimit: 30,
+  massLimit: 900,
 };
 
 export function pageFpsSaverBootstrap(initialSettings = {}, pageWindow = globalThis) {

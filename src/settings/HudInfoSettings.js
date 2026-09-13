@@ -3,6 +3,7 @@ export const HUD_INFO_KEYS = {
   showFps: 'blobio.chat.hudInfo.showFps',
   showScore: 'blobio.chat.hudInfo.showScore',
   showCells: 'blobio.chat.hudInfo.showCells',
+  showMacro: 'blobio.chat.hudInfo.showMacro',
   showPing: 'blobio.chat.hudInfo.showPing',
   showBoosters: 'blobio.chat.hudInfo.showBoosters',
   positionMode: 'blobio.chat.hudInfo.positionMode',
@@ -72,6 +73,7 @@ export const DEFAULT_HUD_INFO_SETTINGS = Object.freeze({
   showFps: true,
   showScore: true,
   showCells: true,
+  showMacro: true,
   showPing: true,
   showBoosters: true,
   positionMode: 'top-left',
@@ -144,6 +146,7 @@ export function normalizeHudInfoSettings(settings = {}) {
     enabled: source.enabled === undefined ? DEFAULT_HUD_INFO_SETTINGS.enabled : Boolean(source.enabled),
     showFps: source.showFps === undefined ? DEFAULT_HUD_INFO_SETTINGS.showFps : Boolean(source.showFps),
     showScore: source.showScore === undefined ? DEFAULT_HUD_INFO_SETTINGS.showScore : Boolean(source.showScore),
+    showMacro: source.showMacro === undefined ? DEFAULT_HUD_INFO_SETTINGS.showMacro : Boolean(source.showMacro),
     showCells: source.showCells === undefined ? DEFAULT_HUD_INFO_SETTINGS.showCells : Boolean(source.showCells),
     showPing: source.showPing === undefined ? DEFAULT_HUD_INFO_SETTINGS.showPing : Boolean(source.showPing),
     showBoosters: source.showBoosters === undefined ? DEFAULT_HUD_INFO_SETTINGS.showBoosters : Boolean(source.showBoosters),
@@ -179,6 +182,7 @@ export function readHudInfoSettings(storage) {
     enabled: readBoolean(storage, HUD_INFO_KEYS.enabled, DEFAULT_HUD_INFO_SETTINGS.enabled),
     showFps: readBoolean(storage, HUD_INFO_KEYS.showFps, DEFAULT_HUD_INFO_SETTINGS.showFps),
     showScore: readBoolean(storage, HUD_INFO_KEYS.showScore, DEFAULT_HUD_INFO_SETTINGS.showScore),
+    showMacro: readBoolean(storage, HUD_INFO_KEYS.showMacro, DEFAULT_HUD_INFO_SETTINGS.showMacro),
     showCells: readBoolean(storage, HUD_INFO_KEYS.showCells, DEFAULT_HUD_INFO_SETTINGS.showCells),
     showPing: readBoolean(storage, HUD_INFO_KEYS.showPing, DEFAULT_HUD_INFO_SETTINGS.showPing),
     showBoosters: readBoolean(storage, HUD_INFO_KEYS.showBoosters, DEFAULT_HUD_INFO_SETTINGS.showBoosters),
@@ -213,6 +217,7 @@ export function saveHudInfoSettings(storage, settings) {
     storage?.setItem?.(HUD_INFO_KEYS.enabled, next.enabled ? '1' : '0');
     storage?.setItem?.(HUD_INFO_KEYS.showFps, next.showFps ? '1' : '0');
     storage?.setItem?.(HUD_INFO_KEYS.showScore, next.showScore ? '1' : '0');
+    storage?.setItem?.(HUD_INFO_KEYS.showMacro, next.showMacro ? '1' : '0');
     storage?.setItem?.(HUD_INFO_KEYS.showCells, next.showCells ? '1' : '0');
     storage?.setItem?.(HUD_INFO_KEYS.showPing, next.showPing ? '1' : '0');
     storage?.setItem?.(HUD_INFO_KEYS.showBoosters, next.showBoosters ? '1' : '0');

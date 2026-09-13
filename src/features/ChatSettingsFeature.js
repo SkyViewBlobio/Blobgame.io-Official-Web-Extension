@@ -863,6 +863,7 @@ export class ChatSettingsFeature {
       ['hud-info-fps', 'showFps'],
       ['hud-info-score', 'showScore'],
       ['hud-info-cells', 'showCells'],
+      ['hud-info-macro', 'showMacro'],
       ['hud-info-ping', 'showPing'],
       ['hud-info-boosters', 'showBoosters'],
       ['hud-booster-last-sec-flash', 'boosterLastSecFlash'],
@@ -1284,6 +1285,7 @@ export class ChatSettingsFeature {
     this.syncBooleanSetting('hud-info-fps', setting.showFps);
     this.syncBooleanSetting('hud-info-score', setting.showScore);
     this.syncBooleanSetting('hud-info-cells', setting.showCells);
+    this.syncBooleanSetting('hud-info-macro', setting.showMacro);
     this.syncBooleanSetting('hud-info-ping', setting.showPing);
     this.syncBooleanSetting('hud-info-boosters', setting.showBoosters);
     this.syncBooleanSetting('hud-booster-last-sec-flash', setting.boosterLastSecFlash);

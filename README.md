@@ -34,7 +34,7 @@ Use this repository as the official safe baseline if you want to customize your 
 
 **No GitHub token is required.** The public loader fetches the extension bundle and role data from this repository's `main` branch. It checks for updates when loaded. Reinstall the loader when a release changes its embedded game hooks, then reload the game.
 
-The release watermark reads **Blob Extension v0.2.87-Release**.
+The release watermark reads **Blob Extension v0.2.89-Release**.
 
 ## Support and community
 

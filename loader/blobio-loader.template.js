@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blobio Web Script Loader
 // @namespace    https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-
-// @version      0.2.87
+// @version      0.2.89
 // @author       SkyView
 // @description  Loads the Blobio extension bundle from GitHub.
 // @match        *://blobgame.io/*
@@ -32,7 +32,7 @@
   'use strict';
 
   const LOG_PREFIX = '[Blobio]';
-  const VERSION = '0.2.87';
+  const VERSION = '0.2.89';
   const CUSTOM_CLIENT_HOST = 'custom.client.blobgame.io';
   const CAPTCHA_LOGO_HIDDEN_KEY = 'blobio.chat.hideCaptchaLogo';
   const RECAPTCHA_FRAME_HOSTS = new Set(['www.google.com', 'www.recaptcha.net']);
@@ -61,6 +61,7 @@
     showFps: 'blobio.chat.hudInfo.showFps',
     showScore: 'blobio.chat.hudInfo.showScore',
     showCells: 'blobio.chat.hudInfo.showCells',
+    showMacro: 'blobio.chat.hudInfo.showMacro',
     showPing: 'blobio.chat.hudInfo.showPing',
     showBoosters: 'blobio.chat.hudInfo.showBoosters',
     positionMode: 'blobio.chat.hudInfo.positionMode',
@@ -137,7 +138,7 @@
   const CELL_PAUSE_RUNTIME_KEY = '__blobioCellPauseRuntime';
   const CELL_PAUSE_STATE_KEY = '__blobioCellPauseState';
   const CELL_PAUSE_MOVEMENT_GATE_KEY = '__blobioCellPauseMovementGateInstalled';
-  const CELL_PAUSE_RUNTIME_VERSION = '0.2.87';
+  const CELL_PAUSE_RUNTIME_VERSION = '0.2.89';
 
   function isRecaptchaAnchorFrame() {
     return RECAPTCHA_FRAME_HOSTS.has(location.hostname)
@@ -841,6 +842,7 @@
       showFps: readBooleanValue(getSharedValue(HUD_INFO_KEYS.showFps), true),
       showScore: readBooleanValue(getSharedValue(HUD_INFO_KEYS.showScore), true),
       showCells: readBooleanValue(getSharedValue(HUD_INFO_KEYS.showCells), true),
+      showMacro: readBooleanValue(getSharedValue(HUD_INFO_KEYS.showMacro), true),
       showPing: readBooleanValue(getSharedValue(HUD_INFO_KEYS.showPing), true),
       showBoosters: readBooleanValue(getSharedValue(HUD_INFO_KEYS.showBoosters), true),
       positionMode: normalizeHudInfoRuntimeMode(
@@ -1253,7 +1255,7 @@
     foodCulling: true,
     foodLimit: 90,
     massCulling: true,
-    massLimit: 30,
+    massLimit: 900,
   };
 
   function normalizeFpsSaverRuntimeSnapshot(value) {
