@@ -350,10 +350,6 @@ class BlobioExtension {
 
   installHudInfoFallback(document, logger) {
     const windowRef = this.window;
-    if (windowRef.__blobioHudInfoInstalled) {
-      return true;
-    }
-
     const storage = createBlobioStorage(document);
     try {
       return Boolean(pageHudInfoBootstrap(readHudInfoSettings(storage), windowRef));
