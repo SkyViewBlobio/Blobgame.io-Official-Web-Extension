@@ -23815,7 +23815,7 @@ html.${className} .blobio-watermark-extension::after {
   var HUD_INFO_PING_STALE_MS = 9e3;
   var HUD_INFO_MAX_SAMPLES = 240;
   var HUD_INFO_BOOSTER_GAME_STALE_MS = 1200;
-  var HUD_INFO_RUNTIME_VERSION = "0.2.89";
+  var HUD_INFO_RUNTIME_VERSION = "0.2.89.1";
   var HUD_INFO_STYLE_MODES2 = /* @__PURE__ */ new Set(["solid", "simple"]);
   var HUD_INFO_DATA_MODES2 = /* @__PURE__ */ new Set(["default", "advanced", "dev"]);
   var HUD_INFO_POSITION_MODES_SET = /* @__PURE__ */ new Set(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"]);
@@ -24388,10 +24388,13 @@ html.${className} .blobio-watermark-extension::after {
     }
     function installWebSocketPingProbe() {
       const NativeWebSocket = win.WebSocket;
-      if (typeof NativeWebSocket !== "function" || NativeWebSocket.__blobioHudInfoWrapped) {
+      if (typeof NativeWebSocket !== "function") {
         return;
       }
       state.nativeWebSocket = NativeWebSocket;
+      if (NativeWebSocket.__blobioHudInfoWrapped) {
+        return;
+      }
       function BlobioHudInfoWebSocket(url, protocols) {
         const socket = protocols === void 0 ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
         monitorSocket(socket, url, protocols);

@@ -5,7 +5,7 @@ const HUD_INFO_PING_PROBE_TIMEOUT_MS = 2500;
 const HUD_INFO_PING_STALE_MS = 9000;
 const HUD_INFO_MAX_SAMPLES = 240;
 const HUD_INFO_BOOSTER_GAME_STALE_MS = 1200;
-const HUD_INFO_RUNTIME_VERSION = '0.2.89';
+const HUD_INFO_RUNTIME_VERSION = '0.2.89.1';
 
 const HUD_INFO_STYLE_MODES = new Set(['solid', 'simple']);
 const HUD_INFO_DATA_MODES = new Set(['default', 'advanced', 'dev']);
@@ -645,10 +645,13 @@ export function pageHudInfoBootstrap(initialSettings, pageWindow = globalThis) {
 
   function installWebSocketPingProbe() {
     const NativeWebSocket = win.WebSocket;
-    if (typeof NativeWebSocket !== 'function' || NativeWebSocket.__blobioHudInfoWrapped) {
+    if (typeof NativeWebSocket !== 'function') {
       return;
     }
     state.nativeWebSocket = NativeWebSocket;
+    if (NativeWebSocket.__blobioHudInfoWrapped) {
+      return;
+    }
 
     function BlobioHudInfoWebSocket(url, protocols) {
       const socket = protocols === undefined ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
