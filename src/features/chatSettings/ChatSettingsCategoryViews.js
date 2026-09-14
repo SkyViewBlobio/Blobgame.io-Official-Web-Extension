@@ -264,6 +264,7 @@ export function createHudInfoCategory(document) {
       createBooleanSetting(document, 'hud-info-fps', 'FPS'),
       createBooleanSetting(document, 'hud-info-score', 'Score'),
       createBooleanSetting(document, 'hud-info-cells', 'Cells'),
+      createBooleanSetting(document, 'hud-info-macro', 'Macro'),
       createBooleanSetting(document, 'hud-info-ping', 'Ping'),
       createHudModeSetting(document, 'hud-fps-mode', 'FPS mode'),
       createHudModeSetting(document, 'hud-score-mode', 'Score mode'),

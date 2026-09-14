@@ -1,6 +1,6 @@
 export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalThis) {
   const win = pageWindow || globalThis;
-  const SCRIPT_VERSION = '0.1.39';
+  const SCRIPT_VERSION = '0.1.40';
   const host = String(win.location?.hostname || '').toLowerCase();
   if (host && host !== 'custom.client.blobgame.io' && host !== 'blobgame.io') {
     return false;
@@ -229,6 +229,11 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     label.nameTop = Infinity;
     label.nameBottom = -Infinity;
     if (!nameDrawn) return;
+    if (cache.__blobioUnicodeBounds) {
+      label.nameTop = cache.__blobioUnicodeBounds.top;
+      label.nameBottom = cache.__blobioUnicodeBounds.bottom;
+      return;
+    }
     // Bitmap glyph quads include outlines that GlyphLayout's height leaves out.
     for (let page = 0; page < cache.j.length; page += 1) {
       const vertices = cache.j[page];
@@ -860,7 +865,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       && cachedCanvas.isConnected !== false
       && !shouldIgnoreCanvasForClanOverlay(cachedCanvas);
     const canvas = useCachedCanvas ? cachedCanvas : findClanTagTargetCanvas(now);
-    if (!canvas) {
+    if (!canvas?.parentNode) {
       return false;
     }
 
@@ -872,8 +877,12 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       }
       overlay.classList?.add?.(CLAN_TAG_OVERLAY_CLASS);
       overlay.setAttribute?.('aria-hidden', 'true');
-      (doc.body || doc.documentElement)?.appendChild?.(overlay);
       clanOverlay.overlay = overlay;
+    }
+
+    // Keep tags above the game canvas but before the page's panels and backdrops.
+    if (canvas.nextSibling !== clanOverlay.overlay) {
+      canvas.parentNode.insertBefore(clanOverlay.overlay, canvas.nextSibling);
     }
 
     if (!clanOverlay.context && clanOverlay.overlay) {
@@ -1001,7 +1010,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     }
 
     const styleText = [
-      `.${CLAN_TAG_OVERLAY_CLASS}{position:fixed;left:0;top:0;z-index:60;pointer-events:none}`,
+      `.${CLAN_TAG_OVERLAY_CLASS}{position:fixed;left:0;top:0;z-index:0;pointer-events:none}`,
       '#chat,#leader-board-wrapper,.blobio-chat-settings-root,.blobio-menu-feature-root{position:relative;z-index:120}',
       '#mouseMenu{z-index:120}',
     ].join('\n');
@@ -2451,6 +2460,12 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
 
   function patchGameBundle(source) {
     const result = patchLegacyGameBundle(source);
+    const unicode = patchUnicodeNames(result.source);
+    if (unicode !== result.source) {
+      result.source = unicode;
+      result.changed = true;
+      result.reason = 'patched-unicode-names';
+    }
     if (typeof result.source !== 'string' || result.source.includes('__blobioCellMassMeasureName(h,')) {
       return result;
     }
@@ -2466,6 +2481,29 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
         'if(h.dynamic&&$wnd.__blobioCellMassPosition){wo(a.i.a);so(a.i.a,h.text,b,c);' +
         'c+=$wnd.__blobioCellMassPosition(h,a.i.a,g.S,g.M,g.u||g.r);xo(a.i.a,a.c)}else{' + draw + '}' + capture);
     return { source: patched, changed: true, reason: 'patched-dynamic-mass' };
+  }
+
+  function patchUnicodeNames(source) {
+    if (typeof source !== 'string' || source.includes('__BlobioUnicodeNameDraw(g,')) return source;
+    const start = 'Nn(a.i.b,1);f=g.M/(a.i.b.B*';
+    const index = source.indexOf(start);
+    const draw = 'Gm(a.i,a.c,g.B,b,c)';
+    const end = source.indexOf(draw, index);
+    const color = 'Mm(a.i,g.u?a.b:g.r?a.a:a.B);';
+    if (index < 0 || end < index || end - index > 700 || !source.includes(color)) return source;
+    // Use native texture bookkeeping and flip V for the game's downward Y axis.
+    const factory = 'function __blobioCreateNameTexture(c){var p,t,r;p=new tk(c.width,c.height);pk(p);p.g.drawImage(c,0,0);try{t=new Xk(p,null,false);yj(t,(sl(),ll),ll);r=new rv(t,0,0,c.width,c.height);Vq(r,false,true);return r}finally{RIe((lk(),kk),$De(p.n))}}\n';
+    const original = source.slice(index, end + draw.length);
+    const rendererStart = source.lastIndexOf('function ', index);
+    const rendererBody = source.indexOf('{', rendererStart);
+    if (rendererStart < 0 || rendererBody < rendererStart || rendererBody >= index) return source;
+    const hooked = source.slice(0, rendererBody + 1) +
+      '$wnd.__BlobioUnicodeNameBeginFrame&&$wnd.__BlobioUnicodeNameBeginFrame(a.c,kt);' + source.slice(rendererBody + 1);
+    return factory + hooked.replace(original,
+      'if($wnd.__BlobioUnicodeNameDraw&&$wnd.__BlobioUnicodeNameDraw(g,a.i,a.c,a.o,__blobioCreateNameTexture,ht,pt,kt,Ok)){' +
+      'f=a.o.b/(a.i.b.e/a.i.b.A);Nn(a.i.b,f);' +
+      '}else{' + original + ';}')
+      .replace(color, 'a.i.a.__blobioUnicodeBounds=null;' + color);
   }
 
   function patchLegacyGameBundle(source) {

@@ -32,9 +32,9 @@ Use this repository as the official safe baseline if you want to customize your 
 3. Disable any older Blobio extension loader to avoid running multiple versions together.
 4. Open Blobgame.io and reload the page.
 
-**No GitHub token is required.** The public loader fetches the extension bundle and role data from this repository's `main` branch. It checks for updates when loaded. Reinstall the loader when a release changes its embedded game hooks, then reload the game.
+**No GitHub token is required.** The public loader fetches the extension bundle and role data from this repository's `main` branch. It checks for updates when loaded. When a release changes its embedded game hooks, open the public release installer, click **Update** in Tampermonkey, then reload the game. Version **0.2.96** requires this loader update; there is no need to uninstall the existing script.
 
-The release watermark reads **Blob Extension v0.2.87-Release**.
+The release watermark reads **Blob Extension v0.2.96-Release**.
 
 ## Support and community
 

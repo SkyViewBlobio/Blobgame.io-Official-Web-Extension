@@ -51,7 +51,6 @@ export function saveVirusMotherCellSettings(storage, settings, document = global
   storage?.setItem?.(VIRUS_MOTHER_CELL_KEYS.color, clean.color);
   storage?.setItem?.(VIRUS_MOTHER_CELL_KEYS.alpha, String(clean.alpha));
   storage?.setItem?.(VIRUS_MOTHER_CELL_KEYS.rotate, clean.rotate ? '1' : '0');
-  writeVirusMotherCellCookie(document, snapshot);
   return clean;
 }
 
@@ -137,22 +136,6 @@ function chooseNewestSnapshot(...snapshots) {
 function normalizeUpdatedAt(value) {
   const updatedAt = Number(value);
   return Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0;
-}
-
-function writeVirusMotherCellCookie(document, snapshot) {
-  if (!document) {
-    return;
-  }
-
-  try {
-    const value = encodeURIComponent(JSON.stringify(snapshot));
-    const hostname = String(document.defaultView?.location?.hostname || globalThis.location?.hostname || '');
-    const domain = hostname === 'blobgame.io' || hostname.endsWith('.blobgame.io')
-      ? '; Domain=.blobgame.io'
-      : '';
-    document.cookie = `${VIRUS_MOTHER_CELL_COOKIE_NAME}=${value}; Path=/; Max-Age=31536000; SameSite=Lax${domain}`;
-  } catch {
-  }
 }
 
 function readBoolean(storage, key, fallback) {

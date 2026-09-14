@@ -3,6 +3,8 @@ export const CELL_RING_KEYS = {
   mode: 'blobio.settings.cellRing.mode',
   solidColor: 'blobio.settings.cellRing.solid.color',
   alpha: 'blobio.settings.cellRing.alpha',
+  glowSize: 'blobio.settings.cellRing.glowSize',
+  borderWidth: 'blobio.settings.cellRing.borderWidth',
   transparentCell: 'blobio.settings.cellRing.transparentCell.enabled',
   cellAlpha: 'blobio.settings.cellRing.transparentCell.alpha',
   nameStyle: 'blobio.settings.cellRing.preview.nameStyle',
@@ -24,6 +26,8 @@ export const DEFAULT_CELL_RING_SETTINGS = Object.freeze({
   mode: 'sync',
   solidColor: '#19e6ff',
   alpha: 0.72,
+  glowSize: 1,
+  borderWidth: 1,
   transparentCell: false,
   cellAlpha: 0.75,
   nameStyle: 'normal',
@@ -44,6 +48,8 @@ export function readCellRingSettings(storage, document = globalThis.document) {
     mode: storage?.getItem?.(CELL_RING_KEYS.mode) || storage?.getItem?.(CELL_RING_KEYS.sideGlowMode),
     solidColor: storage?.getItem?.(CELL_RING_KEYS.solidColor) || storage?.getItem?.(CELL_RING_KEYS.sideGlowColor),
     alpha: storage?.getItem?.(CELL_RING_KEYS.alpha) ?? storage?.getItem?.(CELL_RING_KEYS.sideGlowAlpha),
+    glowSize: storage?.getItem?.(CELL_RING_KEYS.glowSize),
+    borderWidth: storage?.getItem?.(CELL_RING_KEYS.borderWidth),
     transparentCell: readBoolean(storage, CELL_RING_KEYS.transparentCell, DEFAULT_CELL_RING_SETTINGS.transparentCell),
     cellAlpha: storage?.getItem?.(CELL_RING_KEYS.cellAlpha),
     nameStyle: storage?.getItem?.(CELL_RING_KEYS.nameStyle),
@@ -67,6 +73,8 @@ export function saveCellRingSettings(storage, settings, document = globalThis.do
   storage?.setItem?.(CELL_RING_KEYS.mode, clean.mode);
   storage?.setItem?.(CELL_RING_KEYS.solidColor, clean.solidColor);
   storage?.setItem?.(CELL_RING_KEYS.alpha, String(clean.alpha));
+  storage?.setItem?.(CELL_RING_KEYS.glowSize, String(clean.glowSize));
+  storage?.setItem?.(CELL_RING_KEYS.borderWidth, String(clean.borderWidth));
   storage?.setItem?.(CELL_RING_KEYS.transparentCell, clean.transparentCell ? '1' : '0');
   storage?.setItem?.(CELL_RING_KEYS.cellAlpha, String(clean.cellAlpha));
   storage?.setItem?.(CELL_RING_KEYS.nameStyle, clean.nameStyle);
@@ -78,7 +86,6 @@ export function saveCellRingSettings(storage, settings, document = globalThis.do
   storage?.setItem?.(CELL_RING_KEYS.sideGlowAlpha, String(clean.alpha));
   storage?.setItem?.(CELL_RING_KEYS.disabledCellRings, clean.removeAllCellBorders ? '1' : '0');
 
-  writeCellRingCookie(document, snapshot);
   return clean;
 }
 
@@ -121,6 +128,7 @@ export function readCellRingCookie(document = globalThis.document) {
 }
 
 export function normalizeCellRingSettings(settings = {}) {
+  const borderWidth = Number(settings.borderWidth);
   const mode = settings.mode ?? settings.sideGlowMode;
   const solidColor = settings.solidColor ?? settings.sideGlowColor;
   const alpha = settings.alpha ?? settings.sideGlowAlpha;
@@ -131,6 +139,9 @@ export function normalizeCellRingSettings(settings = {}) {
     mode: normalizeMode(mode),
     solidColor: normalizeHexColor(solidColor, DEFAULT_CELL_RING_SETTINGS.solidColor),
     alpha: normalizeAlpha(alpha, DEFAULT_CELL_RING_SETTINGS.alpha),
+    glowSize: normalizeGlowSize(settings.glowSize),
+    borderWidth: settings.borderWidth === null || settings.borderWidth === undefined || settings.borderWidth === '' || !Number.isFinite(borderWidth)
+      ? 1 : Math.max(0, Math.min(6, Math.round(borderWidth * 4) / 4)),
     transparentCell: settings.transparentCell === undefined
       ? DEFAULT_CELL_RING_SETTINGS.transparentCell
       : Boolean(settings.transparentCell),
@@ -138,6 +149,12 @@ export function normalizeCellRingSettings(settings = {}) {
     nameStyle: normalizeNameStyle(settings.nameStyle),
     removeAllCellBorders: Boolean(removeAllCellBorders),
   };
+}
+
+export function normalizeGlowSize(value) {
+  const size = Number(value);
+  return value === null || value === undefined || value === '' || !Number.isFinite(size)
+    ? 1 : Math.max(0.25, Math.min(3, Math.round(size * 100) / 100));
 }
 
 export function normalizeMode(value) {
@@ -175,22 +192,6 @@ function chooseNewestSnapshot(...snapshots) {
 function normalizeUpdatedAt(value) {
   const updatedAt = Number(value);
   return Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0;
-}
-
-function writeCellRingCookie(document, snapshot) {
-  if (!document) {
-    return;
-  }
-
-  try {
-    const value = encodeURIComponent(JSON.stringify(snapshot));
-    const hostname = String(document.defaultView?.location?.hostname || globalThis.location?.hostname || '');
-    const domain = hostname === 'blobgame.io' || hostname.endsWith('.blobgame.io')
-      ? '; Domain=.blobgame.io'
-      : '';
-    document.cookie = `${CELL_RING_COOKIE_NAME}=${value}; Path=/; Max-Age=31536000; SameSite=Lax${domain}`;
-  } catch {
-  }
 }
 
 function readBoolean(storage, key, fallback) {

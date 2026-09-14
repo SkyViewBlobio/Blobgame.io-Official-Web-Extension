@@ -6,6 +6,7 @@ import { VirusPelletColorSettingsUi } from '../../cellColors/VirusPelletColorSet
 import { FpsSaverSettingsUi } from '../../fpsSaver/FpsSaverSettingsUi.js';
 import { readFpsSaverSettings, saveFpsSaverSettings } from '../../fpsSaver/FpsSaverSettings.js';
 import { createBlobioStorage } from '../../storage/BlobioStorage.js';
+import { installNicknameEncoding } from '../../names/NicknameEncoding.js';
 import { JellyShaderSettingsUi } from '../../jelly/JellyShaderSettingsUi.js';
 import {
   isHideAdminMdEnabled,
@@ -42,10 +43,13 @@ import {
   syncUsernameAnimation,
 } from './MenuFeatureVisualSync.js';
 
+// Replace only the known game filter; leave unrelated input handlers intact.
+const NICKNAME_ASCII_FILTER = "this.value = this.value.replaceAll(/[^. a-zA-Z0-9!`?',;:\\(\\)\\[\\]\\{\\}<>|/@\\\\\\^$-%+=#_&~*]+/g, '');";
+
 const DEFAULT_CLASS_NAME = 'blobio-menu-enabled';
 const DEFAULT_STYLE_ID = 'blobio-menu-style';
 const DEFAULT_TOOLBAR_CLASS = 'blobio-menu-toolbar';
-const DEFAULT_EXTENSION_VERSION = '0.2.87';
+const DEFAULT_EXTENSION_VERSION = '0.2.96';
 const HIDDEN_CLASS = 'blobio-original-hidden';
 const WATERMARK_STORAGE_KEY = 'blobio.watermark.enabled';
 const WATERMARK_RIGHT_NUDGE = 60;
@@ -112,6 +116,10 @@ export class MenuFeature {
     this.jellyShaderSettingsUi = null;
     this.clanTextSettingsUi = null;
     this.fpsSaverSettingsUi = null;
+    this.nicknameInput = null;
+    this.nicknameInputFilter = null;
+    this.nicknameInputHandler = null;
+    this.restoreNicknameEncoding = null;
   }
 
   start() {
@@ -129,6 +137,7 @@ export class MenuFeature {
       return true;
     }
 
+    this.restoreNicknameEncoding = installNicknameEncoding(this.document.defaultView, this.logger);
     this.ensureStyle();
     this.applyPageClass();
     this.syncMainMenuAlignment();
@@ -138,6 +147,7 @@ export class MenuFeature {
     this.installExtensionSettings();
     this.installAdminSettingTracking();
     this.installFriendHighlightTracking();
+    this.syncNicknameInput();
     this.syncWatermark();
     this.syncUsernameAnimation();
     this.watchPage();
@@ -167,6 +177,9 @@ export class MenuFeature {
     this.observer?.disconnect();
     this.observer = null;
     this.clearRefreshTimer();
+    this.syncNicknameInput(null);
+    this.restoreNicknameEncoding?.();
+    this.restoreNicknameEncoding = null;
 
     if (this.documentClickHandler) {
       this.document.removeEventListener?.('click', this.documentClickHandler);
@@ -351,6 +364,7 @@ export class MenuFeature {
       this.hideOriginalSections();
       this.installPolicyDock();
       this.installExtensionSettings();
+      this.syncNicknameInput();
       this.syncWatermark();
       this.syncUsernameAnimation();
     }, 0);
@@ -1669,6 +1683,42 @@ export class MenuFeature {
     } catch (error) {
       this.logger.warn('[Blobio] Could not save WaterMark setting.', error);
     }
+  }
+
+  syncNicknameInput(input = findNameInput(this.document)) {
+    if (input === this.nicknameInput) {
+      return;
+    }
+
+    if (this.nicknameInput) {
+      this.nicknameInput.removeEventListener('input', this.nicknameInputHandler);
+      this.nicknameInput.removeEventListener('compositionend', this.nicknameInputHandler);
+      if (this.nicknameInput.getAttribute('oninput') === null && this.nicknameInput.oninput === null) {
+        this.nicknameInput.setAttribute('oninput', this.nicknameInputFilter);
+      }
+    }
+
+    this.nicknameInput = null;
+    this.nicknameInputFilter = null;
+    this.nicknameInputHandler = null;
+    const filter = input?.getAttribute?.('oninput');
+    if (filter !== NICKNAME_ASCII_FILTER) {
+      return;
+    }
+
+    this.nicknameInput = input;
+    this.nicknameInputFilter = filter;
+    input.removeAttribute('oninput');
+    this.nicknameInputHandler = (event) => {
+      if (event.isComposing) {
+        return;
+      }
+      // The game saves names on keyup; mouse paste and IME completion need the same update.
+      const KeyboardEvent = this.document.defaultView.KeyboardEvent;
+      input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' }));
+    };
+    input.addEventListener('input', this.nicknameInputHandler);
+    input.addEventListener('compositionend', this.nicknameInputHandler);
   }
 
   syncWatermark() {
