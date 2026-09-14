@@ -1518,6 +1518,8 @@ html.${className} app-settings .blobio-cell-ring-range-row {
 }
 
 html.${className} app-settings .blobio-cell-ring-alpha-input,
+html.${className} app-settings .blobio-cell-ring-size-input,
+html.${className} app-settings .blobio-cell-ring-border-width-input,
 html.${className} app-settings .blobio-cell-ring-cell-alpha-input {
   width: 100%;
   min-width: 0;

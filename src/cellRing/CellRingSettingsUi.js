@@ -74,6 +74,10 @@ export class CellRingSettingsUi {
       colorSwatch: menu.querySelector('.blobio-cell-ring-color-swatch'),
       alphaInput: menu.querySelector('.blobio-cell-ring-alpha-input'),
       alphaValue: menu.querySelector('.blobio-cell-ring-alpha-value'),
+      glowSizeInput: menu.querySelector('.blobio-cell-ring-size-input'),
+      glowSizeValue: menu.querySelector('.blobio-cell-ring-size-value'),
+      borderWidthInput: menu.querySelector('.blobio-cell-ring-border-width-input'),
+      borderWidthValue: menu.querySelector('.blobio-cell-ring-border-width-value'),
       transparentCell: menu.querySelector('#config-switch-cell-ring-transparent'),
       cellAlphaInput: menu.querySelector('.blobio-cell-ring-cell-alpha-input'),
       cellAlphaValue: menu.querySelector('.blobio-cell-ring-cell-alpha-value'),
@@ -188,6 +192,12 @@ export class CellRingSettingsUi {
 
     previewLayout.append(previewCircle, styleLabel);
     previewSection.appendChild(previewLayout);
+    const borderControl = this.createRangeRow('Border thickness', 'blobio-cell-ring-border-width-input', 'blobio-cell-ring-border-width-value');
+    borderControl.input.max = '6';
+    borderControl.input.step = '0.25';
+    borderControl.input.setAttribute('aria-label', 'Border thickness');
+    this.installTooltip(borderControl.row, 'Border width in the preview. Scales with your cell in-game. Set to 0 for glow only.');
+    previewSection.appendChild(borderControl.row);
     menu.appendChild(previewSection);
 
     const glowSection = this.createSection('Glow');
@@ -228,6 +238,12 @@ export class CellRingSettingsUi {
 
     const alphaControl = this.createRangeRow('Glow alpha', 'blobio-cell-ring-alpha-input', 'blobio-cell-ring-alpha-value');
     glowSection.appendChild(alphaControl.row);
+    const sizeControl = this.createRangeRow('Glow size', 'blobio-cell-ring-size-input', 'blobio-cell-ring-size-value');
+    sizeControl.input.min = '0.25';
+    sizeControl.input.max = '3';
+    sizeControl.input.step = '0.05';
+    sizeControl.input.setAttribute('aria-label', 'Glow size');
+    glowSection.appendChild(sizeControl.row);
     menu.appendChild(glowSection);
 
     const transparentSection = this.createSection('Transparent');
@@ -270,6 +286,16 @@ export class CellRingSettingsUi {
       this.sync();
     });
     this.listen(alphaControl.input, 'change', () => this.flushPendingSave());
+    this.listen(sizeControl.input, 'input', () => {
+      this.scheduleSave({ glowSize: sizeControl.input.value });
+      this.sync();
+    });
+    this.listen(sizeControl.input, 'change', () => this.flushPendingSave());
+    this.listen(borderControl.input, 'input', () => {
+      this.scheduleSave({ borderWidth: borderControl.input.value });
+      this.sync();
+    });
+    this.listen(borderControl.input, 'change', () => this.flushPendingSave());
     this.listen(transparentRow.querySelector('input'), 'change', (event) => {
       this.settings = this.save({ transparentCell: Boolean(event.target?.checked) });
       this.sync();
@@ -445,6 +471,12 @@ export class CellRingSettingsUi {
     this.elements.alphaInput.value = String(this.settings.alpha);
     this.elements.alphaInput.disabled = disabled;
     this.elements.alphaValue.textContent = `${Math.round(this.settings.alpha * 100)}%`;
+    this.elements.glowSizeInput.value = String(this.settings.glowSize);
+    this.elements.glowSizeInput.disabled = disabled;
+    this.elements.glowSizeValue.textContent = `${Math.round(this.settings.glowSize * 100)}%`;
+    this.elements.borderWidthInput.value = String(this.settings.borderWidth);
+    this.elements.borderWidthInput.disabled = disabled;
+    this.elements.borderWidthValue.textContent = `${this.settings.borderWidth}px`;
     this.elements.transparentCell.checked = this.settings.transparentCell;
     this.elements.transparentCell.disabled = disabled;
     this.elements.cellAlphaInput.value = String(this.settings.cellAlpha);
@@ -469,10 +501,11 @@ export class CellRingSettingsUi {
 
     circle.style.backgroundColor = `rgba(${fill.r}, ${fill.g}, ${fill.b}, ${fillAlpha})`;
     circle.style.borderColor = this.toRgbaString(glowColor, Math.min(1, ringAlpha + 0.18));
+    circle.style.borderWidth = `${this.settings.borderWidth}px`;
     circle.style.boxShadow = [
-      `0 0 12px ${this.toRgbaString(glowColor, ringAlpha * 0.75)}`,
-      `0 0 30px ${this.toRgbaString(glowColor, ringAlpha * 0.52)}`,
-      `0 0 58px ${this.toRgbaString(glowColor, ringAlpha * 0.34)}`,
+      `0 0 ${12 * this.settings.glowSize}px ${this.toRgbaString(glowColor, ringAlpha * 0.75)}`,
+      `0 0 ${30 * this.settings.glowSize}px ${this.toRgbaString(glowColor, ringAlpha * 0.52)}`,
+      `0 0 ${58 * this.settings.glowSize}px ${this.toRgbaString(glowColor, ringAlpha * 0.34)}`,
     ].join(', ');
     circle.classList.toggle('is-transparent', this.settings.transparentCell);
 

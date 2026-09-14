@@ -42,7 +42,6 @@ export function saveVirusPelletColorSettings(storage, settings, document = globa
   };
 
   storage?.setItem?.(VIRUS_PELLET_COLOR_SNAPSHOT_KEY, JSON.stringify(snapshot));
-  writeVirusPelletColorCookie(document, snapshot);
   return clean;
 }
 
@@ -145,21 +144,4 @@ function chooseNewestSnapshot(...snapshots) {
 function normalizeUpdatedAt(value) {
   const updatedAt = Number(value);
   return Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0;
-}
-
-function writeVirusPelletColorCookie(document, snapshot) {
-  if (!document) {
-    return;
-  }
-
-  try {
-    const value = encodeURIComponent(JSON.stringify(snapshot));
-    const hostname = String(document.defaultView?.location?.hostname || globalThis.location?.hostname || '');
-    const domain = hostname === 'blobgame.io' || hostname.endsWith('.blobgame.io')
-      ? '; Domain=.blobgame.io'
-      : '';
-    document.cookie = `${VIRUS_PELLET_COLOR_COOKIE_NAME}=${value}; Path=/; Max-Age=31536000; SameSite=Lax${domain}`;
-  } catch {
-    /* Shared local storage remains the main path. */
-  }
 }

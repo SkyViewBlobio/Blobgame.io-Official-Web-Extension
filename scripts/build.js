@@ -16,6 +16,18 @@ const loaderFile = resolve(
 
 const runtimeSpecs = [
   {
+    startMarker: '  /* LEGACY_SETTINGS_COOKIES_START */',
+    endMarker: '  /* LEGACY_SETTINGS_COOKIES_END */',
+    file: resolve(rootDir, 'src/storage/LegacySettingsCookies.js'),
+    exportName: 'migrateLegacySettingsCookies',
+  },
+  {
+    startMarker: '  /* UNICODE_NAMES_RUNTIME_START */',
+    endMarker: '  /* UNICODE_NAMES_RUNTIME_END */',
+    file: resolve(rootDir, 'src/names/pageUnicodeNamesBootstrap.js'),
+    exportName: 'pageUnicodeNamesBootstrap',
+  },
+  {
     startMarker: '  /* VIRUS_RUNTIME_START */',
     endMarker: '  /* VIRUS_RUNTIME_END */',
     file: resolve(rootDir, 'src/virus/pageVirusMotherCellBootstrap.js'),
@@ -73,6 +85,15 @@ const runtimeSpecs = [
 
 const assetSpecs = [
   {
+    startMarker: '  /* UNICODE_NAME_ASSETS_START */',
+    endMarker: '  /* UNICODE_NAME_ASSETS_END */',
+    constName: 'UNICODE_NAME_ASSETS',
+    mime: 'font/woff2',
+    files: {
+      flags: resolve(rootDir, 'assets/fonts/blobio-flags.woff2'),
+    },
+  },
+  {
     startMarker: '  /* VIRUS_ASSETS_START */',
     endMarker: '  /* VIRUS_ASSETS_END */',
     constName: 'VIRUS_MOTHER_CELL_ASSET_URLS',
@@ -109,6 +130,7 @@ try {
     target: 'es2020',
     loader: {
       '.png': 'dataurl',
+      '.woff2': 'dataurl',
     },
   });
 
@@ -149,11 +171,11 @@ function embedRuntime(loader, { startMarker, endMarker, source, exportName }) {
   return replaceBetweenMarkers(loader, startMarker, endMarker, embedded, `${exportName} runtime`);
 }
 
-const toDataUrl = (buffer) => `data:image/png;base64,${buffer.toString('base64')}`;
+const toDataUrl = (buffer, mime = 'image/png') => `data:${mime};base64,${buffer.toString('base64')}`;
 
-function embedAssetMap(loader, { startMarker, endMarker, constName, entries }) {
+function embedAssetMap(loader, { startMarker, endMarker, constName, entries, mime }) {
   const lines = entries
-    .map(([key, buffer]) => `    ${key}: '${toDataUrl(buffer)}',`)
+    .map(([key, buffer]) => `    ${key}: '${toDataUrl(buffer, mime)}',`)
     .join('\n');
   const body = `  const ${constName} = {\n${lines}\n  };`;
 

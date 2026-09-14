@@ -1,6 +1,20 @@
 export const CHAT_SETTINGS_STYLE_ID = 'blobio-chat-settings-style';
 
 export const CHAT_SETTINGS_CSS = `
+#chat,
+#chat li,
+#chat li span,
+#leader-board,
+#leader-board li,
+#leader-board li span {
+  font-family: Ubuntu, "Blobio Flags", "Segoe UI", "Segoe UI Emoji", sans-serif;
+}
+
+#chat,
+#leader-board {
+  font-weight: 500;
+}
+
 .blobio-chat-settings-root {
   position: fixed;
   left: var(--blobio-chat-settings-left, 12px);

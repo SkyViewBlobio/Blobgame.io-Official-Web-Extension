@@ -1,7 +1,7 @@
 export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalThis) {
   const win = pageWindow || globalThis;
-  const SCRIPT_VERSION = '0.2.80-glow-transparent-cell-v22';
-  const PATCH_REVISION = 'native-glow-loader-lifecycle-v22';
+  const SCRIPT_VERSION = '0.2.96-glow-falloff-v24';
+  const PATCH_REVISION = 'native-glow-falloff-v24';
   const host = String(win.location?.hostname || '').toLowerCase();
   if (host && host !== 'custom.client.blobgame.io' && host !== 'blobgame.io') {
     return false;
@@ -19,7 +19,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     win.__blobioCellRingRefresh?.(initialSettings);
     if (!previousState.reloadRequired) {
       previousState.reloadRequired = true;
-        win.console?.warn?.('[Blobio Glow] Reinstall your loader and reload: the early loader and bundle have different renderer revisions.');
+      win.console?.warn?.('[Blobio Glow] Update your Blobio loader and reload: the early loader and bundle have different renderer revisions.');
     }
     return true;
   }
@@ -43,7 +43,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     SHADER_ALPHA_CODES.RAINBOW,
     SHADER_ALPHA_CODES.HAS_BORDER,
   ]);
-  const OVERLAY_GLOW_SCALE = 1.18;
+  const OVERLAY_GLOW_SCALE = 2.2;
   const MAX_GLOW_DRAWS_PER_FRAME = 128;
   const OVERLAY_RENDER_SCALE = 0.78;
   const OVERLAY_CLASS = 'blobio-cell-ring-overlay';
@@ -233,12 +233,18 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
 
   function normalizeSettings(value = {}) {
     const color = normalizeHexColor(value.solidColor ?? value.sideGlowColor, '#19e6ff');
+    const size = Number(value.glowSize);
+    const borderWidth = Number(value.borderWidth);
     const mode = String(value.mode ?? value.sideGlowMode ?? 'sync').toLowerCase() === 'solid' ? 'solid' : 'sync';
     return {
       enabled: value.enabled === undefined ? true : Boolean(value.enabled),
       mode,
       solidColor: color,
       alpha: normalizeAlpha(value.alpha ?? value.sideGlowAlpha, 0.72),
+      glowSize: value.glowSize === null || value.glowSize === undefined || value.glowSize === '' || !Number.isFinite(size)
+        ? 1 : Math.max(0.25, Math.min(3, Math.round(size * 100) / 100)),
+      borderWidth: value.borderWidth === null || value.borderWidth === undefined || value.borderWidth === '' || !Number.isFinite(borderWidth)
+        ? 1 : Math.max(0, Math.min(6, Math.round(borderWidth * 4) / 4)),
       transparentCell: Boolean(value.transparentCell),
       cellAlpha: normalizeAlpha(value.cellAlpha, 0.75),
       nameStyle: normalizeNameStyle(value.nameStyle),
@@ -476,14 +482,16 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       return source;
     }
     // Out-of-range UVs identify our procedural ring without reserving a cell alpha.
-    const patched = source.replace('void main', 'varying mediump float v_blobioGlowRadius;\nvoid main')
+    const patched = source.replace('void main', 'varying mediump float v_blobioGlowRadius;\nvarying mediump float v_blobioBorderWidth;\nvoid main')
       .replace(assignment, assignment + '\n' + [
         '    v_blobioGlowRadius = 0.0;',
-        '    if (a_texCoord0.y >= -3.0 && a_texCoord0.y <= -2.0',
+        '    v_blobioBorderWidth = 0.0;',
+        '    if (a_texCoord0.y >= -3.1 && a_texCoord0.y <= -2.0',
         '        && ((a_texCoord0.x > -3.0 && a_texCoord0.x < -2.0)',
         '            || (a_texCoord0.x > 3.0 && a_texCoord0.x < 4.0))) {',
         '        v_blobioGlowRadius = a_texCoord0.x < 0.0 ? -a_texCoord0.x - 2.0 : a_texCoord0.x - 3.0;',
-        '        v_texCoords = vec2(a_texCoord0.x < 0.0 ? 0.0 : 1.0, -a_texCoord0.y - 2.0);',
+        '        v_blobioBorderWidth = -a_texCoord0.y - (a_texCoord0.y > -2.5 ? 2.0 : 3.0);',
+        '        v_texCoords = vec2(a_texCoord0.x < 0.0 ? 0.0 : 1.0, a_texCoord0.y > -2.5 ? 0.0 : 1.0);',
         '    }',
       ].join('\n'));
     state.shader.glowVertexPatched = true;
@@ -496,16 +504,25 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
         && /void main\s*\(\s*\)\s*\{/.test(original)) {
       original = original.replace(/void main\s*\(\s*\)\s*\{/, [
         'varying mediump float v_blobioGlowRadius;',
+        'varying mediump float v_blobioBorderWidth;',
         'void main() {',
         '    if (v_blobioGlowRadius > 0.0) {',
         '        float d = length(v_texCoords * 2.0 - 1.0);',
         '        float r = v_blobioGlowRadius;',
-        '        float core = smoothstep(max(0.0, r - 0.055), r, d)',
-        '            * (1.0 - smoothstep(r, min(1.0, r + 0.035), d));',
-        '        float halo = smoothstep(max(0.0, r - 0.10), r, d)',
-        '            * (1.0 - smoothstep(r, 1.0, d));',
-        '        float alpha = max(core * 0.95, halo * 0.62) * min(1.0, v_color.a * (255.0 / 254.0));',
-        '        if (alpha <= 0.003) { discard; }',
+        '        float width = r * v_blobioBorderWidth;',
+        '        if (d >= 1.0 || d <= r - width) { discard; }',
+        '        float core = width > 0.0 ? smoothstep(r - width, r - width + min(r * 0.005, width * 0.33), d)',
+        '            * (1.0 - smoothstep(r * 0.998, r * 1.003, d)) : 0.0;',
+        // Approximate the preview's 12/30/58px box shadows around its 132px circle.
+        // The quad includes the faint tail; its boundary is not the halo's falloff curve.
+        '        float outside = max(0.0, d - r) / (1.0 - r);',
+        '        vec3 distance = outside / vec3(0.07576, 0.18939, 0.36616);',
+        '        vec3 shadows = vec3(0.375, 0.26, 0.17)',
+        '            * exp2(-1.151 * distance - 0.505 * distance * distance);',
+        '        float halo = (1.0 - (1.0 - shadows.x) * (1.0 - shadows.y) * (1.0 - shadows.z))',
+        '            * (width > 0.0 ? smoothstep(r - width * 0.67, r, d) : 1.0)',
+        '            * (1.0 - smoothstep(0.85, 1.0, outside));',
+        '        float alpha = (core + (1.0 - core) * halo) * min(1.0, v_color.a * (255.0 / 254.0));',
         '        gl_FragColor = vec4(v_color.rgb, alpha);',
         '        return;',
         '    }',
@@ -609,7 +626,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       return false;
     }
     const info = getCellDrawInfo(cell, projectionMatrix);
-    if (!info || !isNearViewport(info.x, info.y, info.radius)) {
+    if (!info) {
       state.overlay.skipped += 1;
       state.overlay.trackViewportSkips += 1;
       return false;
@@ -619,15 +636,21 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       return false;
     }
     const pixelRadius = Math.max(2, info.radius * overlay.dpr);
-    const glowRadius = Math.max(pixelRadius + 7, pixelRadius * OVERLAY_GLOW_SCALE);
-    const innerRadius = Math.max(0.30, Math.min(0.98, pixelRadius / glowRadius));
+    const glowRadius = pixelRadius + Math.max(7, pixelRadius * (OVERLAY_GLOW_SCALE - 1)) * settings.glowSize;
+    if (!isNearViewport(info.x, info.y, glowRadius / overlay.dpr)) {
+      state.overlay.skipped += 1;
+      state.overlay.trackViewportSkips += 1;
+      return false;
+    }
+    const innerRadius = Math.max(0.01, Math.min(0.98, pixelRadius / glowRadius));
+    const borderWidth = settings.borderWidth / 66;
     const worldRadius = radius * glowRadius / (info.radius * overlay.dpr);
     const color = getCellGlowColor(cell);
     const previousColor = batch.f;
     try {
       setColor(batch, { d: color.r, c: color.g, b: color.b, a: color.a });
       drawTexture(batch, texture, cell.R - worldRadius, cell.S - worldRadius,
-        worldRadius * 2, worldRadius * 2, -2 - innerRadius, -2, 3 + innerRadius, -3);
+        worldRadius * 2, worldRadius * 2, -2 - innerRadius, -2 - borderWidth, 3 + innerRadius, -3 - borderWidth);
     } finally {
       batch.f = previousColor;
     }
@@ -693,7 +716,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
   }
 
   function isNearViewport(x, y, radius) {
-    const margin = Math.max(80, Math.min(260, Number(radius) || 80));
+    const margin = Math.max(80, Number(radius) || 80);
     return x + margin >= 0
       && y + margin >= 0
       && x - margin <= overlay.cssWidth
@@ -1446,7 +1469,8 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
         hasContext: false,
         layer: 'native-cell-before-name',
         frameDraws: overlay.frameDraws,
-        glowScale: OVERLAY_GLOW_SCALE,
+        glowScale: 1 + (OVERLAY_GLOW_SCALE - 1) * settings.glowSize,
+        glowSize: settings.glowSize,
         renderScale: OVERLAY_RENDER_SCALE,
         maxDrawsPerFrame: MAX_GLOW_DRAWS_PER_FRAME,
         cssWidth: roundDebugNumber(overlay.cssWidth),
@@ -1471,6 +1495,8 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       mode: value.mode,
       solidColor: value.solidColor,
       alpha: value.alpha,
+      glowSize: value.glowSize,
+      borderWidth: value.borderWidth,
       transparentCell: value.transparentCell,
       cellAlpha: value.cellAlpha,
       nameStyle: value.nameStyle,

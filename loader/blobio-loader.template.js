@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blobio Web Script Loader
 // @namespace    https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-
-// @version      0.2.89
+// @version      0.2.96
 // @author       SkyView
 // @description  Loads the Blobio extension bundle from GitHub.
 // @match        *://blobgame.io/*
@@ -32,7 +32,7 @@
   'use strict';
 
   const LOG_PREFIX = '[Blobio]';
-  const VERSION = '0.2.89';
+  const VERSION = '0.2.96';
   const CUSTOM_CLIENT_HOST = 'custom.client.blobgame.io';
   const CAPTCHA_LOGO_HIDDEN_KEY = 'blobio.chat.hideCaptchaLogo';
   const RECAPTCHA_FRAME_HOSTS = new Set(['www.google.com', 'www.recaptcha.net']);
@@ -112,6 +112,8 @@
     mode: 'blobio.settings.cellRing.mode',
     solidColor: 'blobio.settings.cellRing.solid.color',
     alpha: 'blobio.settings.cellRing.alpha',
+    glowSize: 'blobio.settings.cellRing.glowSize',
+    borderWidth: 'blobio.settings.cellRing.borderWidth',
     transparentCell: 'blobio.settings.cellRing.transparentCell.enabled',
     cellAlpha: 'blobio.settings.cellRing.transparentCell.alpha',
     nameStyle: 'blobio.settings.cellRing.preview.nameStyle',
@@ -999,6 +1001,8 @@
     const rawMode = String(value.mode || value.sideGlowMode || 'sync').toLowerCase();
     const rawSolidColor = String(value.solidColor || value.sideGlowColor || '#19e6ff').toLowerCase();
     const rawAlpha = Number(value.alpha ?? value.sideGlowAlpha);
+    const rawGlowSize = Number(value.glowSize);
+    const rawBorderWidth = Number(value.borderWidth);
     const rawCellAlpha = Number(value.cellAlpha);
     const rawNameStyle = String(value.nameStyle || 'normal').toLowerCase();
     const updatedAt = Number(value.updatedAt);
@@ -1007,6 +1011,10 @@
       mode: rawMode === 'solid' ? 'solid' : 'sync',
       solidColor: /^#[0-9a-f]{6}$/.test(rawSolidColor) ? rawSolidColor : '#19e6ff',
       alpha: Number.isFinite(rawAlpha) ? Math.max(0, Math.min(1, rawAlpha)) : 0.72,
+      glowSize: value.glowSize === null || value.glowSize === undefined || value.glowSize === '' || !Number.isFinite(rawGlowSize)
+        ? 1 : Math.max(0.25, Math.min(3, Math.round(rawGlowSize * 100) / 100)),
+      borderWidth: value.borderWidth === null || value.borderWidth === undefined || value.borderWidth === '' || !Number.isFinite(rawBorderWidth)
+        ? 1 : Math.max(0, Math.min(6, Math.round(rawBorderWidth * 4) / 4)),
       transparentCell: readBooleanValue(value.transparentCell),
       cellAlpha: Number.isFinite(rawCellAlpha) ? Math.max(0, Math.min(1, rawCellAlpha)) : 0.75,
       nameStyle: ['normal', 'vip', 'yt'].includes(rawNameStyle) ? rawNameStyle : 'normal',
@@ -1036,6 +1044,8 @@
       mode: getSharedValue(CELL_RING_KEYS.mode) || getSharedValue(CELL_RING_KEYS.sideGlowMode),
       solidColor: getSharedValue(CELL_RING_KEYS.solidColor) || getSharedValue(CELL_RING_KEYS.sideGlowColor),
       alpha: getSharedValue(CELL_RING_KEYS.alpha) ?? getSharedValue(CELL_RING_KEYS.sideGlowAlpha),
+      glowSize: getSharedValue(CELL_RING_KEYS.glowSize),
+      borderWidth: getSharedValue(CELL_RING_KEYS.borderWidth),
       transparentCell: readBooleanValue(getSharedValue(CELL_RING_KEYS.transparentCell)),
       cellAlpha: getSharedValue(CELL_RING_KEYS.cellAlpha),
       nameStyle: getSharedValue(CELL_RING_KEYS.nameStyle),
@@ -3662,6 +3672,16 @@
   /* CELL_MASS_RUNTIME_START */
   /* CELL_MASS_RUNTIME_END */
 
+  /* LEGACY_SETTINGS_COOKIES_START */
+  /* LEGACY_SETTINGS_COOKIES_END */
+
+  /* UNICODE_NAMES_RUNTIME_START */
+  /* UNICODE_NAMES_RUNTIME_END */
+
+  /* UNICODE_NAME_ASSETS_START */
+  const UNICODE_NAME_ASSETS = {};
+  /* UNICODE_NAME_ASSETS_END */
+
   /* CELL_RING_RUNTIME_START */
   /* CELL_RING_RUNTIME_END */
 
@@ -4004,6 +4024,7 @@
     const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
     try {
+      pageUnicodeNamesBootstrap(pageWindow, UNICODE_NAME_ASSETS.flags);
       pageCellMassBootstrap(readCellMassRuntimeSettings(), pageWindow);
     } catch (error) {
       logError('Failed to install Show mass runtime.', error);
@@ -4307,6 +4328,7 @@
   installCellPauseGameInputPatch();
   installEarlyKeyboardRuntime();
   installSharedStorageBridge();
+  migrateLegacySettingsCookies(document, { getItem: getSharedValue, setItem: setSharedValue });
   installClanTextRuntimeRefresh();
   installCellRingRuntime();
   installFpsSaverRuntime();

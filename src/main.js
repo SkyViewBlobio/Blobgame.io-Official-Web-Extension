@@ -21,6 +21,7 @@ import emoteThxUrl from '../assets/emote_thx.png';
 import emoteWhyUrl from '../assets/emote_why.png';
 import emoteYoUrl from '../assets/emote_yo.png';
 import { readCellMassSettings } from './cellMass/CellMassSettings.js';
+import { migrateLegacySettingsCookies } from './storage/LegacySettingsCookies.js';
 import { pageCellMassBootstrap } from './cellMass/pageCellMassBootstrap.js';
 import { readCellRingSettings } from './cellRing/CellRingSettings.js';
 import { pageCellRingBootstrap } from './cellRing/pageCellRingBootstrap.js';
@@ -44,6 +45,8 @@ import { FriendRelationService } from './friends/FriendRelationService.js';
 import { HotkeyStore } from './hotkeys/HotkeyStore.js';
 import { readHudInfoSettings } from './settings/HudInfoSettings.js';
 import { pageHudInfoBootstrap } from './hud/pageHudInfoBootstrap.js';
+import { pageUnicodeNamesBootstrap } from './names/pageUnicodeNamesBootstrap.js';
+import flagsFontUrl from '../assets/fonts/blobio-flags.woff2';
 import { readJellyShaderSettings } from './jelly/JellyShaderSettings.js';
 import { pageJellyShaderBootstrap } from './jelly/pageJellyShaderBootstrap.js';
 import { PlayerMuteFeature } from './features/PlayerMuteFeature.js';
@@ -60,7 +63,7 @@ import { pageVirusMotherCellBootstrap } from './virus/pageVirusMotherCellBootstr
 import { pageRenderPerformanceBootstrap } from './performance/pageRenderPerformanceBootstrap.js';
 
 const INSTANCE_KEY = '__blobioExtension';
-const EXTENSION_VERSION = '0.2.89';
+const EXTENSION_VERSION = '0.2.96';
 const VIP_BADGE_URL = vipBadgeUrl;
 const EMOTE_SKIN_ASSETS = {
   cool: emoteCoolUrl,
@@ -107,6 +110,7 @@ class BlobioExtension {
     }
 
     const logger = this.window.console || console;
+    migrateLegacySettingsCookies(document, createBlobioStorage(document));
     this.installFpsSaverFallback(document, logger);
 
     if (hostMode === 'runtime') {
@@ -364,6 +368,7 @@ class BlobioExtension {
     const pageWindow = getTampermonkeyPageWindow(windowRef);
     const storage = createBlobioStorage(document);
     try {
+      pageUnicodeNamesBootstrap(pageWindow, flagsFontUrl);
       return Boolean(pageCellMassBootstrap(readCellMassSettings(storage, document), pageWindow));
     } catch (error) {
       logger.warn?.('[Blobio] Show mass fallback failed.', error);
