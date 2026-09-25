@@ -1,4 +1,4 @@
-const FPS_SAVER_VERSION = '0.1.1';
+const FPS_SAVER_VERSION = '0.1.2';
 const FPS_SAVER_PAGE_HOOK = '__BlobPerfSaver';
 const FPS_SAVER_RUNTIME_HOOK = '__BlobioFpsSaver';
 const FPS_SAVER_STYLE_ID = 'blobio-fps-saver-style';
@@ -639,18 +639,21 @@ function installChatGuard(root, doc, state) {
     cleanupScheduled = true;
     scheduleFrame(root, () => {
       cleanupScheduled = false;
+      if (!state.settings.chatGuard || !state.chatObserver) return;
       trimChat(chat, state);
     });
   });
-  state.chatObserver.observe(chat, { childList: true });
+  state.chatObserver.observe(chat, { childList: true, subtree: true });
   trimChat(chat, state);
 }
 
 function trimChat(chat, state) {
+  // Smooth chat wraps messages in a list; keep the wrapper and its handlers intact.
+  const list = chat.querySelector?.('ul') || chat;
   const max = state.settings.maxChatRows;
   let removed = 0;
-  while (chat.children && chat.children.length > max) {
-    chat.removeChild(chat.firstElementChild || chat.firstChild);
+  while (list.children && list.children.length > max) {
+    list.removeChild(list.firstElementChild || list.firstChild);
     removed += 1;
   }
   state.counters.chatTrimmed += removed;
@@ -728,7 +731,7 @@ function buildDebug(root, doc, state) {
       mainLite: Boolean(doc?.documentElement?.classList?.contains?.('blobio-fps-saver-main-lite')),
       overlayContain: Boolean(doc?.documentElement?.classList?.contains?.('blobio-fps-saver-overlay-contain')),
       toastLite: Boolean(doc?.documentElement?.classList?.contains?.('blobio-fps-saver-toast-lite')),
-      chatRows: Number(doc?.getElementById?.('chat')?.children?.length) || 0,
+      chatRows: Number((doc?.getElementById?.('chat')?.querySelector?.('ul') || doc?.getElementById?.('chat'))?.children?.length) || 0,
     },
     errors: state.errors.slice(),
   };

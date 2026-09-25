@@ -166,7 +166,9 @@ export class CellPauseFeature {
 
   installPointerBlocker() {
     this.pointerBlocker = (event) => {
-      if (!this.paused || event.__blobioCellPauseSynthetic) {
+      if (!this.paused || event.__blobioCellPauseSynthetic
+        || event.target?.matches?.('input[type="range"]')
+        || event.target?.closest?.('.blobio-keystroke-hud.is-editing')) {
         return;
       }
 
@@ -242,6 +244,16 @@ export class CellPauseFeature {
         blockedEvents: 0,
         lastReason: 'feature-gate-installed',
       };
+      existing.shouldBlockEvent = (event) => {
+        if (!state.paused || event?.__blobioCellPauseSynthetic
+          || event?.target?.matches?.('input[type="range"]')
+          || event?.target?.closest?.('.blobio-keystroke-hud.is-editing')) {
+          return false;
+        }
+
+        state.lastReason = 'blocked-movement';
+        return true;
+      };
       this.upgradeMovementRuntime(existing, state);
       try {
         win[CELL_PAUSE_STATE_KEY] = state;
@@ -274,7 +286,9 @@ export class CellPauseFeature {
         return Boolean(state.paused);
       },
       shouldBlockEvent(event) {
-        if (!state.paused || event?.__blobioCellPauseSynthetic) {
+        if (!state.paused || event?.__blobioCellPauseSynthetic
+          || event?.target?.matches?.('input[type="range"]')
+          || event?.target?.closest?.('.blobio-keystroke-hud.is-editing')) {
           return false;
         }
 

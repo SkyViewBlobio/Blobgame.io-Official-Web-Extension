@@ -1,5 +1,6 @@
 import { normalizeUid } from '../roles/RoleRegistry.js';
 import { createBlobioStorage } from '../storage/BlobioStorage.js';
+import { readBooleanSetting } from '../storage/readBooleanSetting.js';
 
 export const MUTED_PLAYERS_ENABLED_KEY = 'blobio.chat.mutedPlayers.enabled';
 export const MUTED_PLAYERS_LIST_KEY = 'blobio.chat.mutedPlayers.list';
@@ -15,14 +16,6 @@ function normalizeNoUidName(value) {
 
 function getNoUidNameKey(value) {
   return normalizeNoUidName(value).toLocaleLowerCase();
-}
-
-function readEnabled(storage) {
-  try {
-    return storage?.getItem?.(MUTED_PLAYERS_ENABLED_KEY) === '1';
-  } catch {
-    return false;
-  }
 }
 
 function readPlayers(storage) {
@@ -86,7 +79,7 @@ export class MutedPlayersStore {
   } = {}) {
     this.storage = storage;
     this.logger = logger;
-    this.enabled = readEnabled(storage);
+    this.enabled = readBooleanSetting(storage, MUTED_PLAYERS_ENABLED_KEY, true);
     this.players = readPlayers(storage);
     this.noUidAll = readNoUidAll(storage);
     this.noUidNames = readNoUidNames(storage);

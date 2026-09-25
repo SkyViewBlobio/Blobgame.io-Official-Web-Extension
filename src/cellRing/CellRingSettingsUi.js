@@ -1,3 +1,5 @@
+import { createSettingsDrag } from '../ui/SettingsDrag.js';
+import { animateDisclosure } from '../ui/animateDisclosure.js';
 import {
   CELL_RING_MODES,
   CELL_RING_NAME_STYLES,
@@ -6,11 +8,11 @@ import {
   normalizeCellRingSettings,
 } from './CellRingSettings.js';
 
-const DESCRIPTION = 'FPS-Impact: Low[1-10]\nAdds a configurable self glow and optional transparent own-cell rendering in-game.\nEstimated loss: 1-10 FPS. Actual impact varies with GPU, zoom, and visible own-cell count.';
+const DESCRIPTION = 'FPS-Impact: Low[1-10]\nAdds a configurable self glow and optional transparent own-cell rendering in-game.';
 const MODE_DESCRIPTION = 'SYNC follows your in-game cell color. SOLID uses the chosen glow color.';
 const TRANSPARENT_DESCRIPTION = 'Controls own-cell alpha, including skinned own cells. Virus textures are protected.';
-const REMOVE_BORDER_DESCRIPTION = 'Removes normal built-in cell borders from every player. Your own glow remains active.';
-const DRAG_SAVE_DELAY_MS = 160;
+const REMOVE_OWN_BORDER_DESCRIPTION = 'Removes the built-in border from your cells, including VIP shader borders. Your Glow Cell outline stays visible.';
+const REMOVE_BORDER_DESCRIPTION = 'Removes built-in cell borders from every player, including VIP shader borders. Your own glow remains active.';
 const MODE_LABELS = {
   sync: 'SYNC',
   solid: 'SOLID',
@@ -40,10 +42,15 @@ export class CellRingSettingsUi {
     this.hideTooltip = hideTooltip;
     this.onOpen = onOpen;
     this.settings = readCellRingSettings(storage, document);
+    this.drag = createSettingsDrag(document.defaultView || globalThis,
+      () => {
+        this.sync();
+        this.notifyRuntime(this.settings);
+      },
+      () => { this.settings = saveCellRingSettings(this.storage, this.settings, this.document); },
+    );
     this.listeners = [];
     this.elements = null;
-    this.pendingSave = null;
-    this.pendingSaveTimer = 0;
     this.syncPreviewColor = SYNC_PREVIEW_COLORS[Math.floor(Math.random() * SYNC_PREVIEW_COLORS.length)] || SYNC_PREVIEW_COLORS[0];
   }
 
@@ -74,6 +81,11 @@ export class CellRingSettingsUi {
       colorSwatch: menu.querySelector('.blobio-cell-ring-color-swatch'),
       alphaInput: menu.querySelector('.blobio-cell-ring-alpha-input'),
       alphaValue: menu.querySelector('.blobio-cell-ring-alpha-value'),
+      outlineColorControl: menu.querySelector('.blobio-cell-ring-outline-color-control'),
+      outlineColorInput: menu.querySelector('.blobio-cell-ring-outline-color-input'),
+      outlineColorSwatch: menu.querySelector('.blobio-cell-ring-outline-color-swatch'),
+      outlineAlphaInput: menu.querySelector('.blobio-cell-ring-outline-alpha-input'),
+      outlineAlphaValue: menu.querySelector('.blobio-cell-ring-outline-alpha-value'),
       glowSizeInput: menu.querySelector('.blobio-cell-ring-size-input'),
       glowSizeValue: menu.querySelector('.blobio-cell-ring-size-value'),
       borderWidthInput: menu.querySelector('.blobio-cell-ring-border-width-input'),
@@ -81,6 +93,7 @@ export class CellRingSettingsUi {
       transparentCell: menu.querySelector('#config-switch-cell-ring-transparent'),
       cellAlphaInput: menu.querySelector('.blobio-cell-ring-cell-alpha-input'),
       cellAlphaValue: menu.querySelector('.blobio-cell-ring-cell-alpha-value'),
+      removeOwnCellBorder: menu.querySelector('#config-switch-cell-ring-remove-own-border'),
       removeAllCellBorders: menu.querySelector('#config-switch-cell-ring-remove-borders'),
     };
 
@@ -89,10 +102,10 @@ export class CellRingSettingsUi {
   }
 
   destroy() {
+    this.drag.flush();
     for (const [node, type, listener, options] of this.listeners) {
       node.removeEventListener?.(type, listener, options);
     }
-    this.flushPendingSave();
     this.listeners = [];
     this.elements?.group?.remove?.();
     this.elements = null;
@@ -207,7 +220,7 @@ export class CellRingSettingsUi {
     modeLabel.textContent = 'Mode';
     const modeButton = this.document.createElement('button');
     modeButton.type = 'button';
-    modeButton.classList.add('blobio-cell-mass-preset-mode-button', 'blobio-cell-ring-mode-button', 'is-sync');
+    modeButton.classList.add('blobio-cell-ring-mode-button', 'is-sync');
     modeButton.setAttribute('aria-label', 'Toggle Glow transparent Cell mode');
     modeButton.append(
       this.createModeText(MODE_LABELS.sync, 'sync'),
@@ -246,6 +259,28 @@ export class CellRingSettingsUi {
     glowSection.appendChild(sizeControl.row);
     menu.appendChild(glowSection);
 
+    const outlineSection = this.createSection('Outline');
+    const outlineColorControl = this.document.createElement('label');
+    outlineColorControl.classList.add('blobio-cell-ring-control', 'blobio-cell-ring-color-control', 'blobio-cell-ring-outline-color-control');
+    const outlineColorTitle = this.document.createElement('span');
+    outlineColorTitle.textContent = 'Outline color';
+    const outlineColorWheel = this.document.createElement('span');
+    outlineColorWheel.classList.add('blobio-ui-color-wheel', 'blobio-cell-ring-color-wheel');
+    const outlineColorSwatch = this.document.createElement('span');
+    outlineColorSwatch.classList.add('blobio-ui-color-swatch', 'blobio-cell-ring-color-swatch', 'blobio-cell-ring-outline-color-swatch');
+    const outlineColorInput = this.document.createElement('input');
+    outlineColorInput.type = 'color';
+    outlineColorInput.classList.add('blobio-ui-color-input', 'blobio-cell-ring-color-input', 'blobio-cell-ring-outline-color-input');
+    outlineColorInput.setAttribute('aria-label', 'Glow outline color');
+    outlineColorWheel.append(outlineColorSwatch, outlineColorInput);
+    outlineColorControl.append(outlineColorTitle, outlineColorWheel);
+    this.installTooltip(outlineColorControl, 'Color of the thin outline at the start of the glow. Follows glow color until you choose one.');
+    outlineSection.appendChild(outlineColorControl);
+    const outlineAlphaControl = this.createRangeRow('Outline alpha', 'blobio-cell-ring-outline-alpha-input', 'blobio-cell-ring-outline-alpha-value');
+    this.installTooltip(outlineAlphaControl.row, 'Opacity of the thin outline. Follows glow alpha until you move this slider.');
+    outlineSection.appendChild(outlineAlphaControl.row);
+    menu.appendChild(outlineSection);
+
     const transparentSection = this.createSection('Transparent');
     const transparentRow = this.createCheckboxRow(
       'config-switch-cell-ring-transparent',
@@ -258,6 +293,11 @@ export class CellRingSettingsUi {
     menu.appendChild(transparentSection);
 
     const miscSection = this.createSection('Misc');
+    miscSection.appendChild(this.createCheckboxRow(
+      'config-switch-cell-ring-remove-own-border',
+      'Remove Only Own Border',
+      REMOVE_OWN_BORDER_DESCRIPTION,
+    ));
     miscSection.appendChild(this.createCheckboxRow(
       'config-switch-cell-ring-remove-borders',
       'Remove all cell borders',
@@ -272,41 +312,56 @@ export class CellRingSettingsUi {
     this.listen(modeButton, 'click', (event) => {
       event.preventDefault?.();
       event.stopPropagation?.();
-      this.flushPendingSave();
+      this.drag.flush();
       this.settings = this.save({ mode: this.nextMode() });
       this.sync();
     });
     this.listen(colorInput, 'input', () => {
       this.scheduleSave({ solidColor: colorInput.value });
-      this.sync();
     });
-    this.listen(colorInput, 'change', () => this.flushPendingSave());
+    this.listen(colorInput, 'change', () => this.drag.flush());
     this.listen(alphaControl.input, 'input', () => {
       this.scheduleSave({ alpha: alphaControl.input.value });
-      this.sync();
     });
-    this.listen(alphaControl.input, 'change', () => this.flushPendingSave());
+    this.listen(alphaControl.input, 'change', () => this.drag.flush());
+    this.listen(outlineColorInput, 'input', () => {
+      this.scheduleSave({ outlineColor: outlineColorInput.value });
+    });
+    this.listen(outlineColorInput, 'change', () => this.drag.flush());
+    this.listen(outlineAlphaControl.input, 'input', () => {
+      this.scheduleSave({ outlineAlpha: outlineAlphaControl.input.value });
+    });
+    this.listen(outlineAlphaControl.input, 'change', () => this.drag.flush());
     this.listen(sizeControl.input, 'input', () => {
       this.scheduleSave({ glowSize: sizeControl.input.value });
-      this.sync();
     });
-    this.listen(sizeControl.input, 'change', () => this.flushPendingSave());
+    this.listen(sizeControl.input, 'change', () => this.drag.flush());
     this.listen(borderControl.input, 'input', () => {
       this.scheduleSave({ borderWidth: borderControl.input.value });
-      this.sync();
     });
-    this.listen(borderControl.input, 'change', () => this.flushPendingSave());
+    this.listen(borderControl.input, 'change', () => this.drag.flush());
     this.listen(transparentRow.querySelector('input'), 'change', (event) => {
       this.settings = this.save({ transparentCell: Boolean(event.target?.checked) });
       this.sync();
     });
     this.listen(cellAlphaControl.input, 'input', () => {
       this.scheduleSave({ cellAlpha: cellAlphaControl.input.value });
+    });
+    this.listen(cellAlphaControl.input, 'change', () => this.drag.flush());
+    this.listen(miscSection.querySelector('#config-switch-cell-ring-remove-own-border'), 'change', (event) => {
+      const checked = Boolean(event.target?.checked);
+      this.settings = this.save({
+        removeOwnCellBorder: checked,
+        removeAllCellBorders: checked ? false : this.settings.removeAllCellBorders,
+      });
       this.sync();
     });
-    this.listen(cellAlphaControl.input, 'change', () => this.flushPendingSave());
-    this.listen(miscSection.querySelector('input'), 'change', (event) => {
-      this.settings = this.save({ removeAllCellBorders: Boolean(event.target?.checked) });
+    this.listen(miscSection.querySelector('#config-switch-cell-ring-remove-borders'), 'change', (event) => {
+      const checked = Boolean(event.target?.checked);
+      this.settings = this.save({
+        removeAllCellBorders: checked,
+        removeOwnCellBorder: checked ? false : this.settings.removeOwnCellBorder,
+      });
       this.sync();
     });
 
@@ -355,7 +410,7 @@ export class CellRingSettingsUi {
 
   createModeText(text, mode) {
     const span = this.document.createElement('span');
-    span.classList.add('blobio-cell-mass-preset-mode-text', 'blobio-cell-ring-mode-text', `is-${mode}`);
+    span.classList.add('blobio-cell-ring-mode-text', `is-${mode}`);
     span.textContent = text;
     return span;
   }
@@ -376,7 +431,7 @@ export class CellRingSettingsUi {
   }
 
   save(changes) {
-    this.clearPendingSaveTimer();
+    this.drag.flush();
     const clean = saveCellRingSettings(this.storage, {
       ...this.settings,
       ...changes,
@@ -405,47 +460,16 @@ export class CellRingSettingsUi {
   }
 
   scheduleSave(changes) {
-    this.pendingSave = {
-      ...(this.pendingSave || {}),
-      ...changes,
-    };
-    this.settings = {
-      ...this.settings,
-      ...changes,
-    };
-    this.notifyRuntime(this.settings);
-    this.clearPendingSaveTimer();
-    const setTimeoutRef = this.document.defaultView?.setTimeout || globalThis.setTimeout;
-    this.pendingSaveTimer = setTimeoutRef?.(() => {
-      this.flushPendingSave();
-      this.sync();
-    }, DRAG_SAVE_DELAY_MS) || 0;
-  }
-
-  flushPendingSave() {
-    if (!this.pendingSave) {
-      return;
-    }
-    const changes = this.pendingSave;
-    this.pendingSave = null;
-    this.clearPendingSaveTimer();
-    this.settings = this.save(changes);
-  }
-
-  clearPendingSaveTimer() {
-    if (!this.pendingSaveTimer) {
-      return;
-    }
-    const clearTimeoutRef = this.document.defaultView?.clearTimeout || globalThis.clearTimeout;
-    clearTimeoutRef?.(this.pendingSaveTimer);
-    this.pendingSaveTimer = 0;
+    this.settings = normalizeCellRingSettings({ ...this.settings, ...changes });
+    this.drag.schedule();
   }
 
   setOpen(open) {
+    if (!open) this.drag.flush();
     if (!this.elements) {
       return;
     }
-    this.elements.menu.hidden = !open;
+    animateDisclosure(this.elements.menu, open);
     this.elements.arrowButton.setAttribute('aria-expanded', String(open));
     this.elements.disclosure.textContent = open ? '-' : '+';
     this.elements.group.classList.toggle('is-open', open);
@@ -471,6 +495,15 @@ export class CellRingSettingsUi {
     this.elements.alphaInput.value = String(this.settings.alpha);
     this.elements.alphaInput.disabled = disabled;
     this.elements.alphaValue.textContent = `${Math.round(this.settings.alpha * 100)}%`;
+    this.elements.outlineColorControl.hidden = this.settings.mode === 'sync';
+    const outlineColor = this.settings.mode === 'sync' ? this.syncPreviewColor : (this.settings.outlineColor || this.settings.solidColor);
+    const outlineAlpha = this.settings.outlineAlpha ?? this.settings.alpha;
+    this.elements.outlineColorInput.value = outlineColor;
+    this.elements.outlineColorInput.disabled = disabled;
+    this.elements.outlineColorSwatch.style.backgroundColor = outlineColor;
+    this.elements.outlineAlphaInput.value = String(outlineAlpha);
+    this.elements.outlineAlphaInput.disabled = disabled;
+    this.elements.outlineAlphaValue.textContent = `${Math.round(outlineAlpha * 100)}%`;
     this.elements.glowSizeInput.value = String(this.settings.glowSize);
     this.elements.glowSizeInput.disabled = disabled;
     this.elements.glowSizeValue.textContent = `${Math.round(this.settings.glowSize * 100)}%`;
@@ -482,6 +515,8 @@ export class CellRingSettingsUi {
     this.elements.cellAlphaInput.value = String(this.settings.cellAlpha);
     this.elements.cellAlphaInput.disabled = disabled || !this.settings.transparentCell;
     this.elements.cellAlphaValue.textContent = `${Math.round(this.settings.cellAlpha * 100)}%`;
+    this.elements.removeOwnCellBorder.checked = this.settings.removeOwnCellBorder;
+    this.elements.removeOwnCellBorder.disabled = disabled;
     this.elements.removeAllCellBorders.checked = this.settings.removeAllCellBorders;
     this.elements.removeAllCellBorders.disabled = disabled;
     this.syncPreview();
@@ -500,7 +535,10 @@ export class CellRingSettingsUi {
     const ringAlpha = this.settings.enabled ? this.settings.alpha : 0.16;
 
     circle.style.backgroundColor = `rgba(${fill.r}, ${fill.g}, ${fill.b}, ${fillAlpha})`;
-    circle.style.borderColor = this.toRgbaString(glowColor, Math.min(1, ringAlpha + 0.18));
+    const outlineColor = this.settings.mode === 'sync' ? glowColor : (this.settings.outlineColor || glowColor);
+    const outlineAlpha = this.settings.outlineAlpha === null
+      ? Math.min(1, ringAlpha + 0.18) : this.settings.outlineAlpha;
+    circle.style.borderColor = this.toRgbaString(outlineColor, this.settings.enabled ? outlineAlpha : 0.16);
     circle.style.borderWidth = `${this.settings.borderWidth}px`;
     circle.style.boxShadow = [
       `0 0 ${12 * this.settings.glowSize}px ${this.toRgbaString(glowColor, ringAlpha * 0.75)}`,

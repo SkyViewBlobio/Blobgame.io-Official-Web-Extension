@@ -1,13 +1,27 @@
+import { createSettingsDrag } from '../../ui/SettingsDrag.js';
+import { animateDisclosure } from '../../ui/animateDisclosure.js';
+import { WATERMARK_KEYS, readWatermarkSettings, watermarkText } from '../../settings/WatermarkSettings.js';
 import { buildMenuCss } from '../../css/MenuFeatureStyles.js';
 import { GameBackgroundSettingsUi } from '../../background/GameBackgroundSettingsUi.js';
 import { CellMassSettingsUi } from '../../cellMass/CellMassSettingsUi.js';
+import {
+  readCellBorderSyncSetting,
+  saveCellBorderSyncSetting,
+} from '../../cellRing/CellBorderSyncSettings.js';
 import { CellRingSettingsUi } from '../../cellRing/CellRingSettingsUi.js';
 import { VirusPelletColorSettingsUi } from '../../cellColors/VirusPelletColorSettingsUi.js';
 import { FpsSaverSettingsUi } from '../../fpsSaver/FpsSaverSettingsUi.js';
 import { readFpsSaverSettings, saveFpsSaverSettings } from '../../fpsSaver/FpsSaverSettings.js';
 import { createBlobioStorage } from '../../storage/BlobioStorage.js';
+import { applyConfig, clearLegacyConfigCookies, exportConfig, parseConfig, resetConfig } from '../../settings/ConfigManager.js';
+import { getTampermonkeyPageWindow } from '../../runtimePageWindow.js';
 import { installNicknameEncoding } from '../../names/NicknameEncoding.js';
+import {
+  readFriendMinimapSettings,
+  saveFriendMinimapSettings,
+} from '../../friends/FriendMinimapSettings.js';
 import { JellyShaderSettingsUi } from '../../jelly/JellyShaderSettingsUi.js';
+import { readLiquidJellySetting, saveLiquidJellySetting } from '../../jelly/LiquidJellySettings.js';
 import {
   isHideAdminMdEnabled,
   readClanTextSettings,
@@ -38,6 +52,7 @@ import {
   EXTENSION_SETTING_CATEGORIES,
 } from './MenuFeatureSettingsConfig.js';
 import { renderExtensionTooltip } from './MenuFeatureTooltip.js';
+import { loadDailyTasks, formatDailyReset } from './DailyTasks.js';
 import {
   findNameInput,
   syncUsernameAnimation,
@@ -49,9 +64,10 @@ const NICKNAME_ASCII_FILTER = "this.value = this.value.replaceAll(/[^. a-zA-Z0-9
 const DEFAULT_CLASS_NAME = 'blobio-menu-enabled';
 const DEFAULT_STYLE_ID = 'blobio-menu-style';
 const DEFAULT_TOOLBAR_CLASS = 'blobio-menu-toolbar';
-const DEFAULT_EXTENSION_VERSION = '0.2.96';
+const DEFAULT_EXTENSION_VERSION = '0.7.5';
 const HIDDEN_CLASS = 'blobio-original-hidden';
 const WATERMARK_STORAGE_KEY = 'blobio.watermark.enabled';
+const DAILY_TASK_MODE_KEY = 'blobio.dailyTasks.mode';
 const WATERMARK_RIGHT_NUDGE = 60;
 const WATERMARK_EXTRA_WIDTH = 96;
 const WATERMARK_INPUT_GAP = 6;
@@ -96,15 +112,26 @@ export class MenuFeature {
     this.footerModalHost = null;
     this.observer = null;
     this.refreshTimer = null;
+    this.refreshReasons = new Set();
+    this.refreshRunning = false;
     this.panelBodies = new Map();
+    this.dailyTaskNames = null;
+    this.dailyTaskResult = null;
+    this.dailyTaskMode = storage.getItem(DAILY_TASK_MODE_KEY) === 'simple' ? 'simple' : 'fancy';
+    this.dailyTaskTimer = null;
+    this.dailyTaskRequest = null;
     this.hiddenOriginalNodes = new Set();
     this.mainMenuAlignmentTargets = new Set();
     this.policyDock = null;
     this.settingsListeners = [];
+    this.extensionSettingsRoot = null;
+    this.cogwheelObserver = null;
+    this.cogwheelAnimations = new Map();
     this.mainMenuLayeredSelectTargets = new Set();
     this.extensionTooltip = null;
     this.documentClickHandler = null;
     this.keydownHandler = null;
+    this.resizeHandler = null;
     this.unsubscribeAdminRoles = null;
     this.unsubscribeAdminUid = null;
     this.unsubscribeFriendHighlight = null;
@@ -115,6 +142,7 @@ export class MenuFeature {
     this.cellRingSettingsUi = null;
     this.jellyShaderSettingsUi = null;
     this.clanTextSettingsUi = null;
+    this.friendHighlightSettingsUi = null;
     this.fpsSaverSettingsUi = null;
     this.nicknameInput = null;
     this.nicknameInputFilter = null;
@@ -168,6 +196,8 @@ export class MenuFeature {
 
     this.document.addEventListener?.('click', this.documentClickHandler);
     this.document.addEventListener?.('keydown', this.keydownHandler);
+    this.resizeHandler = () => this.scheduleRefresh('window-resize');
+    this.document.defaultView?.addEventListener?.('resize', this.resizeHandler);
 
     this.started = true;
     return true;
@@ -191,6 +221,11 @@ export class MenuFeature {
       this.keydownHandler = null;
     }
 
+    if (this.resizeHandler) {
+      this.document.defaultView?.removeEventListener?.('resize', this.resizeHandler);
+      this.resizeHandler = null;
+    }
+
     this.toolbar?.remove();
     this.toolbar = null;
     this.policyDock?.remove();
@@ -198,27 +233,13 @@ export class MenuFeature {
     this.footerModalHost?.remove();
     this.footerModalHost = null;
     this.panelBodies.clear();
+    this.stopDailyTasks();
     this.unsubscribeAdminRoles?.();
     this.unsubscribeAdminUid?.();
     this.unsubscribeFriendHighlight?.();
     this.unsubscribeAdminRoles = null;
     this.unsubscribeAdminUid = null;
     this.unsubscribeFriendHighlight = null;
-    this.virusMotherCellSettingsUi?.destroy?.();
-    this.virusMotherCellSettingsUi = null;
-    this.gameBackgroundSettingsUi?.destroy?.();
-    this.gameBackgroundSettingsUi = null;
-    this.virusPelletColorSettingsUi?.destroy?.();
-    this.virusPelletColorSettingsUi = null;
-    this.cellMassSettingsUi?.destroy?.();
-    this.cellMassSettingsUi = null;
-    this.cellRingSettingsUi?.destroy?.();
-    this.cellRingSettingsUi = null;
-    this.jellyShaderSettingsUi?.destroy?.();
-    this.jellyShaderSettingsUi = null;
-    this.clanTextSettingsUi = null;
-    this.fpsSaverSettingsUi?.destroy?.();
-    this.fpsSaverSettingsUi = null;
     this.cleanupExtensionSettings();
     for (const node of this.hiddenOriginalNodes) {
       node.classList?.remove(HIDDEN_CLASS);
@@ -261,8 +282,12 @@ export class MenuFeature {
   }
 
   applyPageClass() {
-    this.document.documentElement.classList.add(this.className);
-    this.document.body?.classList.add(this.className);
+    if (!this.document.documentElement.classList.contains(this.className)) {
+      this.document.documentElement.classList.add(this.className);
+    }
+    if (this.document.body && !this.document.body.classList.contains(this.className)) {
+      this.document.body.classList.add(this.className);
+    }
   }
 
   syncMainMenuAlignment() {
@@ -279,6 +304,7 @@ export class MenuFeature {
     ];
     const nextTargets = new Set();
     const nextLayeredSelects = new Set();
+    const gameSelects = [];
 
     for (const selector of selectors) {
       for (const node of this.document.querySelectorAll?.(selector) || []) {
@@ -286,15 +312,20 @@ export class MenuFeature {
           continue;
         }
 
-        node.classList?.add(MAIN_MENU_ALIGNMENT_CLASS);
+        if (!node.classList?.contains(MAIN_MENU_ALIGNMENT_CLASS)) {
+          node.classList?.add(MAIN_MENU_ALIGNMENT_CLASS);
+        }
         nextTargets.add(node);
+        if (selector === '#game-wrapper .custom-select') {
+          gameSelects.push(node);
+        }
       }
     }
 
-    const gameSelects = Array.from(this.document.querySelectorAll?.('#game-wrapper .custom-select') || [])
-      .filter((node) => !this.isInsideOwnUi(node));
     for (const node of gameSelects.slice(0, 2)) {
-      node.classList?.add(MAIN_MENU_LAYERED_SELECT_CLASS);
+      if (!node.classList?.contains(MAIN_MENU_LAYERED_SELECT_CLASS)) {
+        node.classList?.add(MAIN_MENU_LAYERED_SELECT_CLASS);
+      }
       nextLayeredSelects.add(node);
     }
 
@@ -335,18 +366,46 @@ export class MenuFeature {
       return;
     }
 
-    this.observer = new MutationObserver((mutations = []) => {
-      if (mutations.length > 0 && mutations.every((mutation) => this.isOwnMutation(mutation))) {
-        return;
-      }
-
-      this.scheduleRefresh();
-    });
+    this.observer = new MutationObserver((mutations = []) => this.handlePageMutations(mutations));
 
     this.observer.observe(this.document.documentElement, { childList: true, subtree: true });
   }
 
-  scheduleRefresh() {
+  handlePageMutations(mutations = []) {
+    if (mutations.length === 0) {
+      this.scheduleRefresh('empty-mutation-batch');
+      return;
+    }
+
+    let ownMutations = 0;
+    for (const mutation of mutations) {
+      if (this.isOwnMutation(mutation)) {
+        ownMutations += 1;
+      }
+    }
+    if (ownMutations === mutations.length) {
+      return;
+    }
+
+    const reasons = [ownMutations > 0 ? 'mixed-mutation-batch' : 'external-mutation-batch'];
+    const settingsRootConnected = !this.extensionSettingsRoot
+      || (typeof this.extensionSettingsRoot.isConnected === 'boolean'
+        ? this.extensionSettingsRoot.isConnected
+        : this.document.documentElement?.contains?.(this.extensionSettingsRoot));
+    if (this.extensionSettingsRoot && !settingsRootConnected) {
+      reasons.push('settings-root-detached');
+    }
+    this.scheduleRefresh(reasons);
+  }
+
+  scheduleRefresh(reasons = 'unspecified') {
+    const nextReasons = Array.isArray(reasons) ? reasons : [reasons];
+    for (const reason of nextReasons) {
+      if (reason) {
+        this.refreshReasons.add(String(reason));
+      }
+    }
+
     if (this.refreshTimer !== null) {
       return;
     }
@@ -354,30 +413,46 @@ export class MenuFeature {
     const setTimer = this.document.defaultView?.setTimeout || globalThis.setTimeout;
     this.refreshTimer = setTimer(() => {
       this.refreshTimer = null;
+      const pendingReasons = Array.from(this.refreshReasons);
+      this.refreshReasons.clear();
       if (!this.started) {
         return;
       }
 
-      this.applyPageClass();
-      this.syncMainMenuAlignment();
-      this.installToolbar();
-      this.hideOriginalSections();
-      this.installPolicyDock();
-      this.installExtensionSettings();
-      this.syncNicknameInput();
-      this.syncWatermark();
-      this.syncUsernameAnimation();
+      this.refreshRunning = true;
+      try {
+        this.refreshPage(pendingReasons);
+      } finally {
+        this.refreshRunning = false;
+      }
     }, 0);
   }
 
-  clearRefreshTimer() {
-    if (this.refreshTimer === null) {
+  refreshPage(reasons = []) {
+    if (reasons.length > 0 && reasons.every((reason) => reason === 'window-resize')) {
+      this.syncExtensionSettingsPanelHeight(this.extensionSettingsRoot);
+      this.syncWatermark();
       return;
     }
 
-    const clearTimer = this.document.defaultView?.clearTimeout || globalThis.clearTimeout;
-    clearTimer(this.refreshTimer);
-    this.refreshTimer = null;
+    this.applyPageClass();
+    this.syncMainMenuAlignment();
+    this.installToolbar();
+    this.hideOriginalSections();
+    this.installPolicyDock();
+    this.installExtensionSettings();
+    this.syncNicknameInput();
+    this.syncWatermark();
+    this.syncUsernameAnimation();
+  }
+
+  clearRefreshTimer() {
+    if (this.refreshTimer !== null) {
+      const clearTimer = this.document.defaultView?.clearTimeout || globalThis.clearTimeout;
+      clearTimer(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this.refreshReasons.clear();
   }
 
   installToolbar() {
@@ -393,13 +468,17 @@ export class MenuFeature {
     if (replayButton?.parentNode) {
       const parent = replayButton.parentNode;
       if (this.toolbar.parentNode === parent && replayButton.nextSibling === this.toolbar) {
-        this.toolbar.classList.remove('is-floating');
+        if (this.toolbar.classList.contains('is-floating')) {
+          this.toolbar.classList.remove('is-floating');
+        }
         return;
       }
 
       const referenceNode = replayButton.nextSibling || null;
       parent.insertBefore(this.toolbar, referenceNode);
-      this.toolbar.classList.remove('is-floating');
+      if (this.toolbar.classList.contains('is-floating')) {
+        this.toolbar.classList.remove('is-floating');
+      }
       return;
     }
 
@@ -407,7 +486,9 @@ export class MenuFeature {
       this.document.body.appendChild(this.toolbar);
     }
 
-    this.toolbar.classList.add('is-floating');
+    if (!this.toolbar.classList.contains('is-floating')) {
+      this.toolbar.classList.add('is-floating');
+    }
   }
 
   createToolbar() {
@@ -420,10 +501,11 @@ export class MenuFeature {
       this.createButton('Featured', this.assets.recommendedButton, 'featured'),
       this.createButton('Updates', this.assets.updatesButton, 'updates'),
       this.createButton('Socials', this.assets.socialsButton, 'socials'),
+      this.createButton('Daily Tasks', this.assets.dailyTasksButton, 'daily-tasks'),
     );
 
     toolbar.appendChild(buttons);
-    toolbar.append(this.createFeaturedPanel(), this.createUpdatesPanel(), this.createSocialsPanel());
+    toolbar.append(this.createFeaturedPanel(), this.createUpdatesPanel(), this.createSocialsPanel(), this.createDailyTasksPanel());
     return toolbar;
   }
 
@@ -488,9 +570,155 @@ export class MenuFeature {
   }
 
   createSocialsPanel() {
-    const panel = this.createPanel('socials', '');
+    const panel = this.createPanel('socials', 'Blobio Socials');
+    panel.querySelector('.blobio-panel-title').classList.add('blobio-social-title');
     this.renderSocialPanel();
     return panel;
+  }
+
+  createDailyTasksPanel() {
+    const panel = this.createPanel('daily-tasks', 'Daily Tasks');
+    const header = panel.querySelector('.blobio-panel-header');
+    const close = panel.querySelector('.blobio-panel-close');
+    const actions = this.document.createElement('div');
+    actions.className = 'blobio-task-header-actions';
+
+    const mode = this.document.createElement('button');
+    mode.type = 'button';
+    mode.className = 'blobio-task-mode-button';
+    mode.classList.toggle('is-simple', this.dailyTaskMode === 'simple');
+    mode.setAttribute('aria-label', `Task display: ${this.dailyTaskMode === 'fancy' ? 'Fancy. Switch to Simple' : 'Simple. Switch to Fancy'}`);
+    mode.innerHTML = '<span>Fancy</span><span>Simple</span>';
+    mode.addEventListener('click', () => {
+      this.dailyTaskMode = this.dailyTaskMode === 'fancy' ? 'simple' : 'fancy';
+      this.storage.setItem(DAILY_TASK_MODE_KEY, this.dailyTaskMode);
+      mode.classList.toggle('is-simple', this.dailyTaskMode === 'simple');
+      mode.setAttribute('aria-label', `Task display: ${this.dailyTaskMode === 'fancy' ? 'Fancy. Switch to Simple' : 'Simple. Switch to Fancy'}`);
+      if (this.dailyTaskResult) this.renderDailyTasks(this.dailyTaskResult);
+    });
+
+    actions.append(mode, close);
+    header.appendChild(actions);
+    this.panelBodies.get('daily-tasks').textContent = 'Open to load your daily tasks.';
+    return panel;
+  }
+
+  renderDailyTasks(result) {
+    const panel = this.document.getElementById('blobio-panel-daily-tasks');
+    const body = this.panelBodies.get('daily-tasks');
+    this.clearElement(body);
+
+    const reset = this.document.createElement('div');
+    reset.className = 'blobio-tasks-reset';
+    reset.textContent = formatDailyReset(result.resetInMs);
+    body.appendChild(reset);
+
+    let visibleTasks = 0;
+    for (const task of result.tasks) {
+      const completed = task.p >= task.l;
+      if (completed && this.dailyTaskMode === 'simple') continue;
+      visibleTasks++;
+
+      const row = this.document.createElement('div');
+      row.className = completed ? 'blobio-task is-complete' : 'blobio-task';
+      const top = this.document.createElement('div');
+      top.className = 'blobio-task-top';
+      const summary = this.document.createElement('div');
+      summary.className = 'blobio-task-summary';
+      const copy = this.document.createElement('div');
+      copy.className = 'blobio-task-copy';
+      const objective = this.document.createElement('span');
+      objective.className = 'blobio-task-objective';
+      objective.textContent = result.names[task.id]?.d || result.names[task.id]?.n || `Task ${task.id}`;
+      if (completed) {
+        const check = this.document.createElement('img');
+        check.className = 'blobio-task-check';
+        check.src = this.assets.taskCompleteIcon;
+        check.alt = '';
+        summary.appendChild(check);
+        const label = this.document.createElement('span');
+        label.className = 'blobio-task-completed';
+        label.textContent = 'COMPLETED';
+        copy.append(objective, label);
+      } else {
+        copy.appendChild(objective);
+      }
+      summary.appendChild(copy);
+      const reward = this.document.createElement('span');
+      reward.className = 'blobio-task-reward';
+      const coin = this.document.createElement('img');
+      coin.src = this.assets.dailyTaskCoin;
+      coin.alt = '';
+      reward.append(coin, String(task.rv));
+      top.append(summary, reward);
+
+      const progress = this.document.createElement('div');
+      progress.className = 'blobio-task-progress';
+      const fill = this.document.createElement('span');
+      fill.style.width = `${Math.min(100, task.p / task.l * 100)}%`;
+      if (task.p === 0) fill.style.display = 'none';
+      progress.appendChild(fill);
+      progress.setAttribute('role', 'progressbar');
+      progress.setAttribute('aria-label', objective.textContent);
+      progress.setAttribute('aria-valuenow', String(task.p));
+      progress.setAttribute('aria-valuemin', '0');
+      progress.setAttribute('aria-valuemax', String(task.l));
+      const count = this.document.createElement('div');
+      count.className = 'blobio-task-count';
+      count.textContent = `${task.p} / ${task.l}`;
+      row.append(top, progress, count);
+      body.appendChild(row);
+    }
+
+    if (!visibleTasks) {
+      const empty = this.document.createElement('div');
+      empty.className = 'blobio-tasks-empty';
+      empty.textContent = 'All daily tasks completed.';
+      body.appendChild(empty);
+    }
+    panel.style.setProperty('--blobio-panel-height', `${panel.firstElementChild.scrollHeight + 2}px`);
+  }
+
+  async refreshDailyTasks() {
+    const panel = this.document.getElementById?.('blobio-panel-daily-tasks');
+    if (!panel?.classList.contains('is-open')) return;
+
+    this.dailyTaskRequest?.abort();
+    const request = new AbortController();
+    this.dailyTaskRequest = request;
+    const body = this.panelBodies.get('daily-tasks');
+    if (!this.dailyTaskNames) body.textContent = 'Loading daily tasks…';
+
+    try {
+      const result = await loadDailyTasks({
+        fetch: this.document.defaultView.fetch.bind(this.document.defaultView),
+        token: this.storage.getItem('access-token'),
+        names: this.dailyTaskNames,
+        signal: request.signal,
+      });
+      if (request.signal.aborted) return;
+      this.dailyTaskNames = result.names;
+      this.dailyTaskResult = result;
+      this.renderDailyTasks(result);
+    } catch (error) {
+      if (request.signal.aborted) return;
+      this.dailyTaskResult = null;
+      body.textContent = error.message === 'sign-in-required'
+        ? 'Sign in to see your daily tasks.'
+        : 'Daily tasks are unavailable. Open this panel to try again.';
+      panel.style.setProperty('--blobio-panel-height', `${panel.firstElementChild.scrollHeight + 2}px`);
+    } finally {
+      if (this.dailyTaskRequest === request) this.dailyTaskRequest = null;
+    }
+  }
+
+  stopDailyTasks() {
+    this.dailyTaskRequest?.abort();
+    this.dailyTaskRequest = null;
+    if (this.dailyTaskTimer !== null) {
+      this.document.defaultView.clearInterval(this.dailyTaskTimer);
+      this.dailyTaskTimer = null;
+    }
   }
 
   installPolicyDock() {
@@ -551,7 +779,7 @@ export class MenuFeature {
     }
 
     if (!existingPanel && this.footerModalHost) {
-      this.footerModalHost.appendChild(this.createPanel(panelName, ''));
+      this.footerModalHost.appendChild(this.createPanel(panelName, 'Policy / Other Games'));
     }
   }
 
@@ -573,6 +801,12 @@ export class MenuFeature {
     const panel = this.document.createElement('section');
     panel.id = `blobio-panel-${name}`;
     panel.classList.add('blobio-menu-panel');
+    const updateScrollState = (event) => {
+      if (event.target !== panel || event.propertyName !== 'max-height') return;
+      panel.classList.toggle('is-settled', event.type === 'transitionend' && panel.classList.contains('is-open'));
+    };
+    panel.addEventListener('transitionrun', updateScrollState);
+    panel.addEventListener('transitionend', updateScrollState);
 
     const inner = this.document.createElement('div');
     inner.classList.add('blobio-panel-inner');
@@ -644,10 +878,6 @@ export class MenuFeature {
 
     this.clearElement(body);
 
-    const title = this.document.createElement('div');
-    title.classList.add('blobio-social-title');
-    title.textContent = 'Blobio Socials';
-
     const row = this.document.createElement('div');
     row.classList.add('blobio-social-row');
 
@@ -667,7 +897,7 @@ export class MenuFeature {
       row.appendChild(link);
     }
 
-    body.append(title, row);
+    body.appendChild(row);
   }
 
   renderPolicyPanel() {
@@ -791,6 +1021,14 @@ export class MenuFeature {
   }
 
   installExtensionSettings() {
+    const settingsRootConnected = !this.extensionSettingsRoot
+      || (typeof this.extensionSettingsRoot.isConnected === 'boolean'
+        ? this.extensionSettingsRoot.isConnected
+        : this.document.documentElement?.contains?.(this.extensionSettingsRoot));
+    if (this.extensionSettingsRoot && !settingsRootConnected) {
+      this.cleanupExtensionSettings(this.extensionSettingsRoot);
+    }
+
     const settingsPanels = Array.from(this.document.querySelectorAll?.('app-settings') || []);
 
     for (const settings of settingsPanels) {
@@ -806,27 +1044,40 @@ export class MenuFeature {
         continue;
       }
 
+      this.extensionSettingsRoot = settings;
+
       let tab = settings.querySelector?.('.blobio-extension-settings-tab');
       let panel = settings.querySelector?.('.blobio-extension-settings-panel');
+      let installationChanged = false;
 
       if (!tab) {
         tab = this.createExtensionSettingsTab(settings);
         tabs.appendChild(tab);
+        installationChanged = true;
       }
 
       if (panel && !panel.querySelector?.('.blobio-extension-category-tabs')) {
         panel.remove?.();
         panel = null;
+        installationChanged = true;
       }
 
       if (!panel) {
         panel = this.createExtensionSettingsPanel();
         content.appendChild(panel);
+        installationChanged = true;
       }
 
-      this.activateExtensionCategory(panel, panel.dataset.activeCategory || EXTENSION_DEFAULT_CATEGORY);
-      this.syncExtensionSettingsCheckboxes(panel);
-      this.syncExtensionSettingsPanelHeight(settings);
+      const extensionSettingsActive = settings.classList.contains('blobio-extension-settings-active');
+      if (extensionSettingsActive) {
+        this.activateExtensionCategory(panel, panel.dataset.activeCategory || EXTENSION_DEFAULT_CATEGORY);
+      }
+      if (installationChanged || extensionSettingsActive) {
+        this.syncExtensionSettingsCheckboxes(panel);
+      }
+      if (extensionSettingsActive) {
+        this.syncExtensionSettingsPanelHeight(settings);
+      }
       this.bindExtensionSettingsWheel(settings);
 
       if (tab.dataset.blobioExtensionListener !== 'true') {
@@ -862,9 +1113,14 @@ export class MenuFeature {
   }
 
   createExtensionSettingsPanel() {
+    this.cleanupCogwheels();
     const panel = this.document.createElement('div');
     panel.classList.add('blobio-extension-settings-panel');
     panel.setAttribute('_ngcontent-c3', '');
+    if (this.assets.cogwheelIcon) {
+      panel.classList.add('blobio-has-cogwheel');
+      panel.style.setProperty('--blobio-cogwheel-icon', `url("${this.assets.cogwheelIcon}")`);
+    }
 
     const tabs = this.document.createElement('div');
     tabs.classList.add('blobio-extension-category-tabs');
@@ -979,6 +1235,15 @@ export class MenuFeature {
       onOpen: (ui) => this.closeExtensionSettingMenus(ui),
     });
     categoryPanels.get('cell').appendChild(this.cellRingSettingsUi.create());
+    categoryPanels.get('cell').appendChild(this.createExtensionSwitchRow({
+      id: 'config-switch-cell-border-sync',
+      label: 'Cell Border Sync',
+      description: EXTENSION_OPTION_TOOLTIPS.cellBorderSync,
+      checked: readCellBorderSyncSetting(this.storage),
+      onChange: (enabled, checkbox) => {
+        checkbox.checked = saveCellBorderSyncSetting(this.storage, enabled);
+      },
+    }));
 
     this.virusMotherCellSettingsUi?.destroy?.();
     this.virusMotherCellSettingsUi = new VirusMotherCellSettingsUi({
@@ -1027,27 +1292,23 @@ export class MenuFeature {
       onOpen: (ui) => this.closeExtensionSettingMenus(ui),
     });
     categoryPanels.get('animation').appendChild(this.jellyShaderSettingsUi.create());
+    categoryPanels.get('animation').appendChild(this.createExtensionSwitchRow({
+      id: 'config-switch-liquid-jelly',
+      label: 'Liquid Jelly',
+      description: 'FPS-Impact: Low[1-20]\nA new version of the old Jelly-Physics shader.',
+      checked: readLiquidJellySetting(this.storage),
+      onChange: (enabled, checkbox) => {
+        checkbox.checked = saveLiquidJellySetting(this.storage, enabled);
+        getTampermonkeyPageWindow(this.document.defaultView)?.__blobioLiquidJellyRefresh?.({
+          enabled: checkbox.checked,
+          version: this.version,
+        });
+      },
+    }));
 
     categoryPanels.get('text').append(
-      this.createExtensionSwitchRow({
-        id: 'config-switch-watermark',
-        label: 'WaterMark',
-        description: EXTENSION_OPTION_TOOLTIPS.watermark,
-        checked: this.isWatermarkEnabled(),
-        onChange: (enabled) => {
-          this.setWatermarkEnabled(enabled);
-          this.syncWatermark();
-        },
-      }),
-      this.createExtensionSwitchRow({
-        id: 'config-switch-friend-highlight',
-        label: 'Friends-highlight',
-        description: EXTENSION_OPTION_TOOLTIPS.friendHighlight,
-        checked: Boolean(this.friendHighlightStore?.isEnabled?.()),
-        onChange: (enabled, checkbox) => {
-          checkbox.checked = this.friendHighlightStore?.setEnabled?.(enabled) ?? false;
-        },
-      }),
+      this.createWatermarkSettingsGroup(),
+      this.createFriendHighlightSettingsGroup(),
       this.createClanTextSettingsGroup(),
       this.createExtensionSwitchRow({
         id: 'config-switch-hide-admin-md',
@@ -1061,9 +1322,57 @@ export class MenuFeature {
       }),
     );
 
+    categoryPanels.get('misc').appendChild(this.createConfigManagerGroup());
+
     panel.appendChild(tabs);
     for (const [key] of EXTENSION_SETTING_CATEGORIES) {
       panel.appendChild(categoryPanels.get(key));
+    }
+
+    if (this.assets.cogwheelIcon) {
+      const cogwheelButtons = panel.querySelectorAll('.blobio-extension-setting-row > button[aria-expanded]');
+      for (const button of cogwheelButtons) {
+        const icon = this.document.createElement('span');
+        icon.className = 'blobio-cogwheel-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        button.appendChild(icon);
+      }
+
+      this.cogwheelObserver = new this.document.defaultView.MutationObserver(records => {
+        for (const record of records) {
+          const button = record.target;
+          const open = button.getAttribute('aria-expanded') === 'true';
+          if (record.oldValue === String(open)) {
+            continue;
+          }
+
+          const icon = button.querySelector('.blobio-cogwheel-icon');
+          const matrix = new this.document.defaultView.DOMMatrix(this.document.defaultView.getComputedStyle(icon).transform);
+          const angle = (Math.atan2(matrix.b, matrix.a) * 180 / Math.PI + 360) % 360;
+          this.cogwheelAnimations.get(icon)?.cancel();
+
+          if (open) {
+            this.cogwheelAnimations.set(icon, icon.animate([
+              { transform: `rotate(${angle}deg)` },
+              { transform: `rotate(${angle + 360}deg)` },
+            ], { duration: 7200, iterations: Infinity, easing: 'linear' }));
+          } else if (angle > 0.5) {
+            this.cogwheelAnimations.set(icon, icon.animate([
+              { transform: `rotate(${angle}deg)` },
+              { transform: 'rotate(0deg)' },
+            ], { duration: Math.max(180, angle / 360 * 900), easing: 'cubic-bezier(.25, .9, .4, 1)' }));
+          } else {
+            this.cogwheelAnimations.delete(icon);
+          }
+        }
+      });
+      for (const button of cogwheelButtons) {
+        this.cogwheelObserver.observe(button, {
+          attributes: true,
+          attributeFilter: ['aria-expanded'],
+          attributeOldValue: true,
+        });
+      }
     }
 
     this.activateExtensionCategory(panel, EXTENSION_DEFAULT_CATEGORY);
@@ -1153,6 +1462,9 @@ export class MenuFeature {
       this.jellyShaderSettingsUi,
       this.fpsSaverSettingsUi,
       this.clanTextSettingsUi,
+      this.friendHighlightSettingsUi,
+      this.watermarkSettingsUi,
+      this.configManagerUi,
     ]) {
       if (ui && ui !== except) {
         ui.setOpen?.(false);
@@ -1168,24 +1480,30 @@ export class MenuFeature {
     const validCategory = EXTENSION_SETTING_CATEGORIES.some(([key]) => key === category)
       ? category
       : EXTENSION_DEFAULT_CATEGORY;
-    panel.dataset.activeCategory = validCategory;
+    if (panel.dataset.activeCategory !== validCategory) {
+      panel.dataset.activeCategory = validCategory;
+    }
 
     for (const button of panel.querySelectorAll?.('.blobio-extension-category-button') || []) {
       const active = button.dataset.category === validCategory;
-      if (active) {
+      if (active && !button.classList.contains('is-active')) {
         button.classList.add('is-active');
-      } else {
+      } else if (!active && button.classList.contains('is-active')) {
         button.classList.remove('is-active');
       }
-      button.setAttribute('aria-selected', String(active));
+      if (button.getAttribute?.('aria-selected') !== String(active)) {
+        button.setAttribute('aria-selected', String(active));
+      }
     }
 
     for (const categoryPanel of panel.querySelectorAll?.('.blobio-extension-category-panel') || []) {
       const active = categoryPanel.dataset.category === validCategory;
-      categoryPanel.hidden = !active;
-      if (active) {
+      if (categoryPanel.hidden !== !active) {
+        categoryPanel.hidden = !active;
+      }
+      if (active && !categoryPanel.classList.contains('is-active')) {
         categoryPanel.classList.add('is-active');
-      } else {
+      } else if (!active && categoryPanel.classList.contains('is-active')) {
         categoryPanel.classList.remove('is-active');
       }
     }
@@ -1257,6 +1575,431 @@ export class MenuFeature {
     });
   }
 
+  createConfigManagerGroup() {
+    const group = this.document.createElement('div');
+    group.className = 'grid-item blobio-extension-setting-group blobio-config-manager-group';
+    const row = this.document.createElement('div');
+    row.className = 'blobio-extension-setting-row blobio-config-manager-main-row';
+    const title = this.document.createElement('span');
+    title.textContent = 'Config Manager';
+    const arrow = this.document.createElement('button');
+    arrow.type = 'button';
+    arrow.className = 'blobio-clan-text-dropdown-button';
+    arrow.setAttribute('aria-label', 'Open Config Manager');
+    const symbol = this.document.createElement('span');
+    symbol.className = 'blobio-clan-text-dropdown-symbol';
+    symbol.setAttribute('aria-hidden', 'true');
+    arrow.appendChild(symbol);
+    row.append(title, arrow);
+
+    const menu = this.document.createElement('div');
+    menu.className = 'blobio-background-button-menu blobio-config-manager-menu';
+    menu.hidden = true;
+    const api = { setOpen: open => {
+      animateDisclosure(menu, open);
+      symbol.textContent = open ? '-' : '+';
+      arrow.setAttribute('aria-expanded', String(open));
+      group.classList.toggle('is-open', open);
+    } };
+    this.configManagerUi = api;
+    api.setOpen(false);
+    this.addSettingsListener(arrow, 'click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const open = menu.hidden;
+      if (open) this.closeExtensionSettingMenus(api);
+      api.setOpen(open);
+    });
+
+    const status = this.document.createElement('div');
+    status.className = 'blobio-config-manager-status';
+    status.setAttribute('role', 'status');
+    const button = (label, onClick) => {
+      const control = this.document.createElement('button');
+      control.type = 'button';
+      control.className = 'blobio-config-manager-action';
+      control.textContent = label;
+      this.addSettingsListener(control, 'click', onClick);
+      return control;
+    };
+
+    const fileInput = this.document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json,application/json';
+    fileInput.hidden = true;
+    this.addSettingsListener(fileInput, 'change', async () => {
+      const file = fileInput.files?.[0];
+      fileInput.value = '';
+      if (!file) return;
+      try {
+        if (file.size > 1024 * 1024) throw new Error('Config file is too large.');
+        const settings = parseConfig(await file.text());
+        if (!clearLegacyConfigCookies(this.document)) throw new Error('Old settings cookies could not be cleared.');
+        applyConfig(this.storage, settings);
+        this.document.defaultView.location.reload();
+      } catch (error) {
+        status.textContent = `Import failed: ${error.message}`;
+      }
+    });
+
+    const save = button('Save config', async () => {
+      try {
+        const contents = JSON.stringify(exportConfig(this.storage), null, 2);
+        const filename = `Blobio-config-${new Date().toISOString().slice(0, 10)}.json`;
+        const win = this.document.defaultView;
+        if (typeof win.showSaveFilePicker === 'function') {
+          try {
+            const handle = await win.showSaveFilePicker({
+              suggestedName: filename,
+              types: [{ description: 'Blobio config', accept: { 'application/json': ['.json'] } }],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(contents);
+            await writable.close();
+            status.textContent = 'Config saved.';
+            return;
+          } catch (error) {
+            if (error.name === 'AbortError') return;
+            if (error.name !== 'SecurityError' && error.name !== 'NotAllowedError') throw error;
+          }
+        }
+        const url = win.URL.createObjectURL(new win.Blob([contents], { type: 'application/json' }));
+        const link = this.document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        this.document.body.appendChild(link);
+        link.click();
+        link.remove();
+        win.setTimeout(() => win.URL.revokeObjectURL(url), 1000);
+        status.textContent = 'Config download started.';
+      } catch (error) {
+        status.textContent = `Save failed: ${error.message}`;
+      }
+    });
+    const reset = button('Reset config', () => {
+      if (!this.document.defaultView.confirm('Reset all extension settings to defaults? Saved tokens will stay on this device.')) return;
+      try {
+        if (!clearLegacyConfigCookies(this.document)) throw new Error('Old settings cookies could not be cleared.');
+        resetConfig(this.storage);
+        this.document.defaultView.location.reload();
+      } catch (error) {
+        status.textContent = `Reset failed: ${error.message}`;
+      }
+    });
+    const importButton = button('Import config', () => fileInput.click());
+    menu.append(save, reset, importButton, fileInput, status);
+    group.append(row, menu);
+    return group;
+  }
+
+  createWatermarkSettingsGroup() {
+    this.watermarkSettingsUi?.flush?.();
+    const group = this.document.createElement('div');
+    group.className = 'grid-item blobio-extension-setting-group blobio-watermark-setting-group';
+    const main = this.createExtensionSwitchRow({
+      id: 'config-switch-watermark', label: 'WaterMark',
+      description: EXTENSION_OPTION_TOOLTIPS.watermark, checked: this.isWatermarkEnabled(),
+      onChange: enabled => { this.setWatermarkEnabled(enabled); this.syncWatermark(); },
+    });
+    const menu = this.document.createElement('div');
+    menu.className = 'blobio-background-button-menu';
+    menu.hidden = true;
+    const arrow = this.document.createElement('button');
+    arrow.type = 'button';
+    arrow.className = 'blobio-clan-text-dropdown-button';
+    arrow.setAttribute('aria-label', 'Open WaterMark settings');
+    const disclosure = this.document.createElement('span');
+    disclosure.className = 'blobio-clan-text-dropdown-symbol';
+    disclosure.setAttribute('aria-hidden', 'true');
+    arrow.appendChild(disclosure);
+    const api = { setOpen: open => {
+      if (!open) this.watermarkSettingsUi?.flush?.();
+      animateDisclosure(menu, open);
+      disclosure.textContent = open ? '-' : '+';
+      arrow.setAttribute('aria-expanded', String(open));
+      group.classList.toggle('is-open', open);
+    } };
+    this.watermarkSettingsUi = api;
+    api.setOpen(false);
+    this.addSettingsListener(arrow, 'click', event => {
+      event.preventDefault(); event.stopPropagation();
+      const open = menu.hidden;
+      if (open) this.closeExtensionSettingMenus(api);
+      api.setOpen(open);
+    });
+    main.querySelector('.blobio-extension-row-spacer')?.remove();
+    main.classList.add('blobio-clan-text-main-row');
+    main.append(arrow);
+    const current = readWatermarkSettings(this.storage);
+    const controls = this.document.createElement('div');
+    controls.hidden = !current.enabled;
+    controls.className = 'blobio-watermark-controls';
+    const save = (key, value) => {
+      this.storage.setItem(key, value);
+      sync();
+      this.document.defaultView.dispatchEvent(new this.document.defaultView.Event('blobio-watermark-change'));
+    };
+    const enabled = this.createClanTextCheckboxRow({
+      id: 'config-switch-ingame-watermark', label: 'In-game Watermark', checked: current.enabled,
+      onChange: value => { this.watermarkSettingsUi?.flush?.(); animateDisclosure(controls, value); save(WATERMARK_KEYS.enabled, value ? '1' : '0'); },
+    });
+    const modes = this.document.createElement('div');
+    modes.className = 'blobio-background-mode-row';
+    const modeLabel = this.document.createElement('span');
+    modeLabel.textContent = 'Mode';
+    const modeButton = this.document.createElement('button');
+    modeButton.type = 'button';
+    modeButton.className = 'blobio-background-mode-button';
+    for (const [mode, style] of [['normal', 'solid'], ['welcomer', 'gradient']]) {
+      const text = this.document.createElement('span');
+      text.className = `blobio-background-mode-text is-${style}`;
+      text.textContent = mode === 'normal' ? 'Normal' : 'Welcomer';
+      modeButton.append(text);
+    }
+    this.addSettingsListener(modeButton, 'click', () => {
+      this.watermarkSettingsUi?.flush?.();
+      const mode = readWatermarkSettings(this.storage).mode === 'normal' ? 'welcomer' : 'normal';
+      save(WATERMARK_KEYS.mode, mode);
+    });
+    modes.append(modeLabel, modeButton);
+    const colorLabel = this.document.createElement('label');
+    colorLabel.className = 'blobio-background-control blobio-background-color-control';
+    const colorTitle = this.document.createElement('span');
+    colorTitle.textContent = 'Text Color';
+    const wheel = this.document.createElement('span');
+    wheel.className = 'blobio-background-color-wheel';
+    const swatch = this.document.createElement('span');
+    swatch.className = 'blobio-background-color-swatch';
+    const color = this.document.createElement('input');
+    color.type = 'color'; color.value = current.color;
+    color.className = 'blobio-background-color-input';
+    color.setAttribute('aria-label', 'Watermark text color');
+    let colorDraft = null;
+    const drag = createSettingsDrag(this.document.defaultView || globalThis, () => {
+      sync(colorDraft);
+      const win = this.document.defaultView;
+      win.dispatchEvent(new win.CustomEvent('blobio-watermark-change', { detail: colorDraft }));
+    }, () => {
+      save(WATERMARK_KEYS.color, colorDraft.color);
+      colorDraft = null;
+    });
+    api.flush = drag.flush;
+    this.addSettingsListener(color, 'input', () => {
+      colorDraft = { ...(colorDraft || readWatermarkSettings(this.storage)), color: color.value };
+      drag.schedule();
+    });
+    this.addSettingsListener(color, 'change', () => drag.flush());
+    this.addSettingsListener(color, 'blur', () => drag.flush());
+    wheel.append(swatch, color);
+    colorLabel.append(colorTitle, wheel);
+    const preview = this.document.createElement('div');
+    preview.className = 'blobio-background-preview blobio-watermark-preview';
+    const sync = (settings = readWatermarkSettings(this.storage)) => {
+      preview.textContent = watermarkText(this.version, settings.mode, this.storage.getItem(WATERMARK_KEYS.profileName));
+      preview.style.color = settings.color;
+      swatch.style.backgroundColor = settings.color;
+      modeButton.classList.toggle('is-gradient', settings.mode === 'welcomer');
+      modeButton.setAttribute('aria-label', `Watermark mode: ${settings.mode === 'normal' ? 'Normal' : 'Welcomer'}. Click to switch.`);
+    };
+    sync();
+    controls.append(preview, modes, colorLabel);
+    menu.append(enabled, controls);
+    group.append(main, menu);
+    return group;
+  }
+
+  createFriendHighlightSettingsGroup() {
+    const group = this.document.createElement('div');
+    group.className = 'grid-item blobio-extension-setting-group blobio-extension-clan-text-group';
+
+    const main = this.createExtensionSwitchRow({
+      id: 'config-switch-friend-highlight',
+      label: 'Friends-highlight',
+      description: EXTENSION_OPTION_TOOLTIPS.friendHighlight,
+      checked: Boolean(this.friendHighlightStore?.isEnabled?.()),
+      onChange: (enabled, checkbox) => {
+        checkbox.checked = this.friendHighlightStore?.setEnabled?.(enabled) ?? false;
+      },
+    });
+    main.classList.add('blobio-clan-text-main-row');
+    main.querySelector?.('.blobio-extension-row-spacer')?.remove();
+
+    const arrowButton = this.document.createElement('button');
+    arrowButton.type = 'button';
+    arrowButton.className = 'blobio-clan-text-dropdown-button';
+    arrowButton.setAttribute('aria-label', 'Open Friends-highlight settings');
+    arrowButton.setAttribute('aria-expanded', 'false');
+    const disclosure = this.document.createElement('span');
+    disclosure.className = 'blobio-clan-text-dropdown-symbol';
+    disclosure.setAttribute('aria-hidden', 'true');
+    disclosure.textContent = '+';
+    arrowButton.append(disclosure);
+    main.append(arrowButton);
+
+    const menu = this.document.createElement('div');
+    menu.className = 'blobio-clan-text-button-menu';
+    menu.hidden = true;
+    const current = readFriendMinimapSettings(this.storage);
+    const refreshRuntime = (settings) => {
+      getTampermonkeyPageWindow(this.document.defaultView)?.__blobioCellMassRefresh?.({
+        friendMinimapName: settings.enabled,
+        friendMinimapColor: settings.color,
+        friendMinimapMode: settings.mode,
+        friendMinimapNameMode: settings.nameMode,
+        friendMinimapInGameColor: settings.inGameColor,
+      });
+    };
+    const save = (changes) => {
+      const settings = saveFriendMinimapSettings(this.storage, changes);
+      refreshRuntime(settings);
+      return settings;
+    };
+    const minimapName = this.createClanTextCheckboxRow({
+      id: 'config-switch-friend-minimap-name',
+      label: 'Friend minimap name',
+      checked: current.enabled,
+      onChange: (enabled, checkbox) => {
+        checkbox.checked = save({ enabled }).enabled;
+      },
+    });
+    minimapName.dataset.blobioTooltip = EXTENSION_OPTION_TOOLTIPS.friendMinimapName;
+    this.addSettingsListener(minimapName, 'mouseenter', (event) => this.showExtensionTooltip(minimapName, event));
+    this.addSettingsListener(minimapName, 'mousemove', (event) => this.moveExtensionTooltip(event));
+    this.addSettingsListener(minimapName, 'mouseleave', () => this.hideExtensionTooltip());
+
+    const controls = this.document.createElement('div');
+    controls.className = 'blobio-friend-minimap-controls';
+    const modesTitle = this.document.createElement('div');
+    modesTitle.className = 'blobio-cell-ring-section-title';
+    modesTitle.textContent = 'Modes/Options';
+    const modeRow = this.document.createElement('div');
+    modeRow.className = 'blobio-background-mode-row';
+    const modeLabel = this.document.createElement('span');
+    modeLabel.textContent = 'Brackets';
+    const modeButton = this.document.createElement('button');
+    modeButton.type = 'button';
+    modeButton.className = 'blobio-background-mode-button';
+    for (const [mode, style] of [['normal', 'solid'], ['bracket', 'gradient']]) {
+      const text = this.document.createElement('span');
+      text.className = `blobio-background-mode-text is-${style}`;
+      text.textContent = mode === 'normal' ? 'Normal' : 'Bracket';
+      modeButton.append(text);
+    }
+    modeRow.append(modeLabel, modeButton);
+
+    const nameModeRow = this.document.createElement('div');
+    nameModeRow.className = 'blobio-background-mode-row';
+    const nameModeLabel = this.document.createElement('span');
+    nameModeLabel.textContent = 'Names';
+    const nameModeButton = this.document.createElement('button');
+    nameModeButton.type = 'button';
+    nameModeButton.className = 'blobio-background-mode-button';
+    for (const [nameMode, style] of [['both', 'solid'], ['onlyProfile', 'gradient']]) {
+      const text = this.document.createElement('span');
+      text.className = `blobio-background-mode-text is-${style}`;
+      text.textContent = nameMode === 'both' ? 'Both' : 'OnlyProfile';
+      nameModeButton.append(text);
+    }
+    nameModeRow.append(nameModeLabel, nameModeButton);
+
+    const colorsTitle = this.document.createElement('div');
+    colorsTitle.className = 'blobio-cell-ring-section-title';
+    colorsTitle.textContent = 'Colors';
+    const colors = [];
+    for (const [key, title, ariaLabel] of [
+      ['color', 'Profile Name Color', 'Friend minimap profile name color'],
+      ['inGameColor', 'In-game Name Color', 'Friend minimap in-game name color'],
+    ]) {
+      const label = this.document.createElement('label');
+      label.className = 'blobio-background-control blobio-background-color-control';
+      const caption = this.document.createElement('span');
+      caption.textContent = title;
+      const wheel = this.document.createElement('span');
+      wheel.className = 'blobio-background-color-wheel';
+      const swatch = this.document.createElement('span');
+      swatch.className = 'blobio-background-color-swatch';
+      const input = this.document.createElement('input');
+      input.type = 'color';
+      input.value = current[key];
+      input.className = 'blobio-background-color-input';
+      input.setAttribute('aria-label', ariaLabel);
+      wheel.append(swatch, input);
+      label.append(caption, wheel);
+      colors.push({ key, label, input, swatch });
+    }
+
+    const sync = (settings = readFriendMinimapSettings(this.storage)) => {
+      for (const { key, input, swatch } of colors) {
+        input.value = settings[key];
+        swatch.style.backgroundColor = settings[key];
+      }
+      modeButton.classList.toggle('is-gradient', settings.mode === 'bracket');
+      modeButton.setAttribute('aria-label', `Friend minimap name mode: ${settings.mode === 'bracket' ? 'Bracket' : 'Normal'}. Click to switch.`);
+      nameModeButton.classList.toggle('is-gradient', settings.nameMode === 'onlyProfile');
+      nameModeButton.setAttribute('aria-label', `Friend minimap names: ${settings.nameMode === 'onlyProfile' ? 'OnlyProfile' : 'Both'}. Click to switch.`);
+    };
+    let colorDraft = null;
+    let colorKey = null;
+    const drag = createSettingsDrag(this.document.defaultView || globalThis, () => {
+      sync(colorDraft);
+      refreshRuntime(colorDraft);
+    }, () => {
+      save({ [colorKey]: colorDraft[colorKey] });
+      colorDraft = null;
+      colorKey = null;
+    });
+    this.addSettingsListener(modeButton, 'click', () => {
+      drag.flush();
+      const mode = readFriendMinimapSettings(this.storage).mode === 'normal' ? 'bracket' : 'normal';
+      sync(save({ mode }));
+    });
+    this.addSettingsListener(nameModeButton, 'click', () => {
+      drag.flush();
+      const nameMode = readFriendMinimapSettings(this.storage).nameMode === 'both' ? 'onlyProfile' : 'both';
+      sync(save({ nameMode }));
+    });
+    for (const { key, input } of colors) {
+      this.addSettingsListener(input, 'input', () => {
+        if (colorKey !== key) drag.flush();
+        colorKey = key;
+        colorDraft = { ...readFriendMinimapSettings(this.storage), [key]: input.value };
+        drag.schedule();
+      });
+      this.addSettingsListener(input, 'change', () => drag.flush());
+      this.addSettingsListener(input, 'blur', () => drag.flush());
+    }
+    sync(current);
+    controls.append(modesTitle, modeRow, nameModeRow, colorsTitle, ...colors.map(({ label }) => label));
+    menu.append(minimapName, controls);
+
+    const api = {
+      setOpen: (open) => {
+        if (!open) {
+          drag.flush();
+        }
+        animateDisclosure(menu, open);
+        arrowButton.setAttribute('aria-expanded', String(open));
+        disclosure.textContent = open ? '-' : '+';
+        group.classList.toggle('is-open', open);
+      },
+      flush: drag.flush,
+      sync,
+    };
+    this.friendHighlightSettingsUi = api;
+    this.addSettingsListener(arrowButton, 'click', (event) => {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      const open = menu.hidden !== false;
+      if (open) {
+        this.closeExtensionSettingMenus(api);
+      }
+      api.setOpen(open);
+    });
+
+    group.append(main, menu);
+    return group;
+  }
+
   createClanTextSettingsGroup() {
     const group = this.document.createElement('div');
     group.classList.add('grid-item', 'blobio-extension-setting-group', 'blobio-extension-clan-text-group');
@@ -1316,7 +2059,7 @@ export class MenuFeature {
     const disclosure = main.querySelector?.('.blobio-clan-text-dropdown-symbol');
     const api = {
       setOpen: (open) => {
-        menu.hidden = !open;
+        animateDisclosure(menu, open);
         arrowButton?.setAttribute?.('aria-expanded', String(open));
         if (disclosure) {
           disclosure.textContent = open ? '-' : '+';
@@ -1451,6 +2194,7 @@ export class MenuFeature {
   }
 
   setFpsSaverSetting(changes) {
+    this.fpsSaverSettingsUi?.drag.flush();
     return saveFpsSaverSettings(this.storage, {
       ...readFpsSaverSettings(this.storage, this.document),
       ...changes,
@@ -1462,23 +2206,35 @@ export class MenuFeature {
     const extensionTab = settings.querySelector?.('.blobio-extension-settings-tab');
 
     for (const item of left?.querySelector?.('ul')?.children || []) {
-      item.classList?.remove('active');
+      if (item.classList?.contains('active')) {
+        item.classList.remove('active');
+      }
     }
 
     const panel = settings.querySelector?.('.blobio-extension-settings-panel');
+    if (!settings.classList.contains('blobio-extension-settings-active')) {
+      settings.classList.add('blobio-extension-settings-active');
+    }
+    if (extensionTab && !extensionTab.classList.contains('active')) {
+      extensionTab.classList.add('active');
+    }
     this.activateExtensionCategory(panel, panel?.dataset?.activeCategory || EXTENSION_DEFAULT_CATEGORY);
+    this.syncExtensionSettingsCheckboxes(panel);
     this.syncExtensionSettingsPanelHeight(settings);
-    settings.classList.add('blobio-extension-settings-active');
-    extensionTab?.classList.add('active');
   }
 
   deactivateExtensionSettings(settings) {
-    settings.classList.remove('blobio-extension-settings-active');
-    settings.querySelector?.('.blobio-extension-settings-tab')?.classList.remove('active');
+    if (settings.classList.contains('blobio-extension-settings-active')) {
+      settings.classList.remove('blobio-extension-settings-active');
+    }
+    const tab = settings.querySelector?.('.blobio-extension-settings-tab');
+    if (tab?.classList.contains('active')) {
+      tab.classList.remove('active');
+    }
   }
 
   syncExtensionSettingsPanelHeight(settings) {
-    if (!settings) {
+    if (!settings?.classList?.contains('blobio-extension-settings-active')) {
       return;
     }
 
@@ -1517,15 +2273,14 @@ export class MenuFeature {
   }
 
   syncExtensionSettingsCheckboxes(panel) {
-    const watermark = panel.querySelector?.('#config-switch-watermark');
-    if (watermark) {
-      watermark.checked = this.isWatermarkEnabled();
+    if (!panel) {
+      return;
     }
+    const watermark = panel.querySelector?.('#config-switch-watermark');
+    setCheckedIfChanged(watermark, this.isWatermarkEnabled());
 
     const fpsUncap = panel.querySelector?.('#config-switch-fps-uncap');
-    if (fpsUncap) {
-      fpsUncap.checked = isFpsUncapEnabled(this.storage);
-    }
+    setCheckedIfChanged(fpsUncap, isFpsUncapEnabled(this.storage));
 
     const fpsSaverSettings = readFpsSaverSettings(this.storage, this.document);
     const fpsSaverSwitches = {
@@ -1537,24 +2292,26 @@ export class MenuFeature {
     };
     for (const [selector, key] of Object.entries(fpsSaverSwitches)) {
       const checkbox = panel.querySelector?.(selector);
-      if (checkbox) {
-        checkbox.checked = Boolean(fpsSaverSettings[key]);
-      }
+      setCheckedIfChanged(checkbox, fpsSaverSettings[key]);
     }
 
     const friendHighlight = panel.querySelector?.('#config-switch-friend-highlight');
-    if (friendHighlight) {
-      friendHighlight.checked = Boolean(this.friendHighlightStore?.isEnabled?.());
-    }
+    setCheckedIfChanged(friendHighlight, this.friendHighlightStore?.isEnabled?.());
+
+    const friendMinimapName = panel.querySelector?.('#config-switch-friend-minimap-name');
+    setCheckedIfChanged(friendMinimapName, readFriendMinimapSettings(this.storage).enabled);
+    this.friendHighlightSettingsUi?.sync?.();
 
     const hideAdminMd = panel.querySelector?.('#config-switch-hide-admin-md');
-    if (hideAdminMd) {
-      hideAdminMd.checked = isHideAdminMdEnabled(this.storage);
-    }
+    setCheckedIfChanged(hideAdminMd, isHideAdminMdEnabled(this.storage));
 
     this.jellyShaderSettingsUi?.sync?.();
+    const liquidJelly = panel.querySelector?.('#config-switch-liquid-jelly');
+    setCheckedIfChanged(liquidJelly, readLiquidJellySetting(this.storage));
     this.cellMassSettingsUi?.sync?.();
     this.cellRingSettingsUi?.sync?.();
+    const cellBorderSync = panel.querySelector?.('#config-switch-cell-border-sync');
+    setCheckedIfChanged(cellBorderSync, readCellBorderSyncSetting(this.storage));
     this.fpsSaverSettingsUi?.sync?.();
     this.syncAdminSettingVisibility(panel);
   }
@@ -1564,9 +2321,7 @@ export class MenuFeature {
       this.unsubscribeFriendHighlight = this.friendHighlightStore?.subscribe?.(() => {
         for (const panel of this.document.querySelectorAll?.('.blobio-extension-settings-panel') || []) {
           const checkbox = panel.querySelector?.('#config-switch-friend-highlight');
-          if (checkbox) {
-            checkbox.checked = Boolean(this.friendHighlightStore?.isEnabled?.());
-          }
+          setCheckedIfChanged(checkbox, this.friendHighlightStore?.isEnabled?.());
         }
       }) || null;
     }
@@ -1595,10 +2350,12 @@ export class MenuFeature {
     }
 
     const visible = this.isCurrentUserAdmin();
-    row.hidden = !visible;
-    if (visible) {
+    if (row.hidden !== !visible) {
+      row.hidden = !visible;
+    }
+    if (visible && row.classList.contains('is-hidden')) {
       row.classList.remove('is-hidden');
-    } else {
+    } else if (!visible && !row.classList.contains('is-hidden')) {
       row.classList.add('is-hidden');
     }
   }
@@ -1613,19 +2370,62 @@ export class MenuFeature {
     this.settingsListeners.push({ node, type, handler, options });
   }
 
-  cleanupExtensionSettings() {
-    for (const { node, type, handler, options } of this.settingsListeners) {
+  cleanupCogwheels() {
+    this.cogwheelObserver?.disconnect();
+    this.cogwheelObserver = null;
+    for (const animation of this.cogwheelAnimations.values()) {
+      animation.cancel();
+    }
+    this.cogwheelAnimations.clear();
+  }
+
+  cleanupExtensionSettings(root = null) {
+    const retainedListeners = [];
+    for (const listener of this.settingsListeners) {
+      const { node, type, handler, options } = listener;
+      if (root && node !== root && !root.contains?.(node)) {
+        retainedListeners.push(listener);
+        continue;
+      }
       node.removeEventListener?.(type, handler, options);
     }
+    this.settingsListeners = retainedListeners;
 
-    this.settingsListeners = [];
+    if (root && root !== this.extensionSettingsRoot) {
+      return;
+    }
 
-    for (const settings of this.document.querySelectorAll?.('app-settings') || []) {
+    this.cleanupCogwheels();
+    this.watermarkSettingsUi?.flush?.();
+    this.friendHighlightSettingsUi?.flush?.();
+    this.virusMotherCellSettingsUi?.destroy?.();
+    this.gameBackgroundSettingsUi?.destroy?.();
+    this.virusPelletColorSettingsUi?.destroy?.();
+    this.cellMassSettingsUi?.destroy?.();
+    this.cellRingSettingsUi?.destroy?.();
+    this.jellyShaderSettingsUi?.destroy?.();
+    this.fpsSaverSettingsUi?.destroy?.();
+    this.virusMotherCellSettingsUi = null;
+    this.gameBackgroundSettingsUi = null;
+    this.virusPelletColorSettingsUi = null;
+    this.cellMassSettingsUi = null;
+    this.cellRingSettingsUi = null;
+    this.jellyShaderSettingsUi = null;
+    this.clanTextSettingsUi = null;
+    this.friendHighlightSettingsUi = null;
+    this.fpsSaverSettingsUi = null;
+    this.watermarkSettingsUi = null;
+    this.configManagerUi = null;
+    this.extensionSettingsRoot = null;
+
+    const settingsRoots = root ? [root] : Array.from(this.document.querySelectorAll?.('app-settings') || []);
+    for (const settings of settingsRoots) {
       settings.classList?.remove('blobio-extension-settings-active');
       delete settings.dataset.blobioExtensionWheelListener;
     }
 
-    for (const node of this.document.querySelectorAll?.('.blobio-extension-settings-tab, .blobio-extension-settings-panel') || []) {
+    const queryRoot = root || this.document;
+    for (const node of queryRoot.querySelectorAll?.('.blobio-extension-settings-tab, .blobio-extension-settings-panel') || []) {
       node.remove();
     }
 
@@ -1831,7 +2631,12 @@ export class MenuFeature {
       return;
     }
 
+    panel.style.setProperty('--blobio-panel-height', `${panel.scrollHeight + 2}px`);
     panel.classList.add('is-open');
+    if (panelName === 'daily-tasks') {
+      this.refreshDailyTasks();
+      this.dailyTaskTimer = this.document.defaultView.setInterval(() => this.refreshDailyTasks(), 60_000);
+    }
 
     for (const button of this.getPanelButtons()) {
       if (button.dataset.panel === panelName) {
@@ -1841,8 +2646,9 @@ export class MenuFeature {
   }
 
   closePanels() {
+    this.stopDailyTasks();
     for (const panel of this.getPanels()) {
-      panel.classList.remove('is-open');
+      panel.classList.remove('is-open', 'is-settled');
     }
 
     for (const button of this.getPanelButtons()) {
@@ -1934,11 +2740,15 @@ export class MenuFeature {
 
   setStyleProperty(node, name, value) {
     if (typeof node.style?.setProperty === 'function') {
+      if (node.style.getPropertyValue?.(name) === String(value)
+          && !node.style.getPropertyPriority?.(name)) {
+        return;
+      }
       node.style.setProperty(name, value);
       return;
     }
 
-    if (node.style) {
+    if (node.style && node.style[name] !== value) {
       node.style[name] = value;
     }
   }
@@ -2025,5 +2835,12 @@ export class MenuFeature {
     }
 
     element.textContent = '';
+  }
+}
+
+function setCheckedIfChanged(checkbox, checked) {
+  const value = Boolean(checked);
+  if (checkbox && checkbox.checked !== value) {
+    checkbox.checked = value;
   }
 }

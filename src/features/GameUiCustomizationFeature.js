@@ -1,3 +1,4 @@
+import { applyHudOutline, backgroundFill, hexToRgba } from '../ui/ColorStyles.js';
 import { createBlobioStorage } from '../storage/BlobioStorage.js';
 import {
   LEADERBOARD_SIZE_LIMITS,
@@ -11,14 +12,6 @@ const CHAT_SHIFT_ANIMATION_MS = 620;
 const CHAT_SHIFT_DECAY_MS = CHAT_SHIFT_ANIMATION_MS / Math.log(100);
 const CHAT_SHIFT_SETTLE_PX = 0.5;
 const CHAT_MESSAGE_FALLBACK_HEIGHT = 24;
-
-function hexToRgba(color, alpha) {
-  const value = String(color || '#000000').replace('#', '');
-  const red = Number.parseInt(value.slice(0, 2), 16) || 0;
-  const green = Number.parseInt(value.slice(2, 4), 16) || 0;
-  const blue = Number.parseInt(value.slice(4, 6), 16) || 0;
-  return `rgba(${red}, ${green}, ${blue}, ${Math.max(0, Math.min(1, Number(alpha) || 0))})`;
-}
 
 function setCssVariable(element, name, value) {
   if (typeof element?.style?.setProperty === 'function') {
@@ -117,23 +110,39 @@ export class GameUiCustomizationFeature {
 
     const outlineTarget = this.document.querySelector?.('#chat-wrapper') || chat;
     if (this.chatOutlineTarget && this.chatOutlineTarget !== outlineTarget) {
-      this.chatOutlineTarget.classList?.remove('blobio-chat-outline-enabled');
+      this.chatOutlineTarget.classList?.remove('blobio-chat-outline-enabled', 'blobio-chat-background-wrapper');
+      this.chatOutlineTarget.classList?.remove('blobio-chat-blur-enabled');
+      applyHudOutline(this.chatOutlineTarget, { enabled: false });
+      removeCssVariable(this.chatOutlineTarget, '--blobio-chat-blur');
       removeCssVariable(this.chatOutlineTarget, '--blobio-chat-outline');
+      removeCssVariable(this.chatOutlineTarget, '--blobio-chat-background');
     }
     this.chatOutlineTarget = outlineTarget;
+    outlineTarget.classList.toggle('blobio-chat-blur-enabled', Boolean(settings.chatBlur?.enabled));
+    setCssVariable(outlineTarget, '--blobio-chat-blur', `${settings.chatBlur?.value ?? 8}px`);
 
     chat.classList.toggle('blobio-chat-background-enabled', settings.chatBackground.enabled);
+    chat.classList.toggle('blobio-chat-slider-enabled', settings.chatSlider.enabled);
+    outlineTarget.classList.toggle('blobio-chat-background-wrapper', settings.chatBackground.enabled);
     outlineTarget.classList.toggle('blobio-chat-outline-enabled', settings.chatOutline.enabled);
 
     if (settings.chatBackground.enabled) {
-      setCssVariable(chat, '--blobio-chat-background', hexToRgba(
-        settings.chatBackground.color,
-        settings.chatBackground.alpha,
-      ));
+      setCssVariable(outlineTarget, '--blobio-chat-background', backgroundFill(settings.chatBackground));
     } else {
-      removeCssVariable(chat, '--blobio-chat-background');
+      removeCssVariable(outlineTarget, '--blobio-chat-background');
     }
 
+    if (settings.chatSlider.enabled) {
+      const { color, alpha } = settings.chatSlider;
+      const red = Math.round(102 + (Number.parseInt(color.slice(1, 3), 16) - 102) * alpha);
+      const green = Math.round(102 + (Number.parseInt(color.slice(3, 5), 16) - 102) * alpha);
+      const blue = Math.round(102 + (Number.parseInt(color.slice(5, 7), 16) - 102) * alpha);
+      setCssVariable(chat, '--blobio-chat-slider', `rgba(${red}, ${green}, ${blue}, 0.7)`);
+    } else {
+      removeCssVariable(chat, '--blobio-chat-slider');
+    }
+
+    applyHudOutline(outlineTarget, settings.chatOutline, settings.chatGlow);
     if (settings.chatOutline.enabled) {
       setCssVariable(outlineTarget, '--blobio-chat-outline', hexToRgba(
         settings.chatOutline.color,
@@ -153,6 +162,8 @@ export class GameUiCustomizationFeature {
     }
 
     this.ensureLeaderboardResizeHandle(wrapper);
+    wrapper.classList.toggle('blobio-leaderboard-blur-enabled', Boolean(settings.leaderboardBlur?.enabled));
+    setCssVariable(wrapper, '--blobio-leaderboard-blur', `${settings.leaderboardBlur?.value ?? 8}px`);
 
     wrapper.classList.toggle(
       'blobio-leaderboard-background-enabled',
@@ -168,14 +179,12 @@ export class GameUiCustomizationFeature {
     );
 
     if (settings.leaderboardBackground.enabled) {
-      setCssVariable(wrapper, '--blobio-leaderboard-background', hexToRgba(
-        settings.leaderboardBackground.color,
-        settings.leaderboardBackground.alpha,
-      ));
+      setCssVariable(wrapper, '--blobio-leaderboard-background', backgroundFill(settings.leaderboardBackground));
     } else {
       removeCssVariable(wrapper, '--blobio-leaderboard-background');
     }
 
+    applyHudOutline(wrapper, settings.leaderboardOutline, settings.leaderboardGlow);
     if (settings.leaderboardOutline.enabled) {
       setCssVariable(wrapper, '--blobio-leaderboard-outline', hexToRgba(
         settings.leaderboardOutline.color,
@@ -825,11 +834,16 @@ export class GameUiCustomizationFeature {
     this.messageTimers.clear();
 
     const chat = this.document.querySelector?.('#chat');
-    chat?.classList?.remove('blobio-chat-background-enabled', 'blobio-chat-outline-enabled');
+    chat?.classList?.remove('blobio-chat-background-enabled', 'blobio-chat-outline-enabled', 'blobio-chat-slider-enabled');
     removeCssVariable(chat, '--blobio-chat-background');
+    removeCssVariable(chat, '--blobio-chat-slider');
     removeCssVariable(chat, '--blobio-chat-outline');
-    this.chatOutlineTarget?.classList?.remove('blobio-chat-outline-enabled');
+    this.chatOutlineTarget?.classList?.remove('blobio-chat-outline-enabled', 'blobio-chat-background-wrapper');
+    this.chatOutlineTarget?.classList?.remove('blobio-chat-blur-enabled');
+    removeCssVariable(this.chatOutlineTarget, '--blobio-chat-blur');
     removeCssVariable(this.chatOutlineTarget, '--blobio-chat-outline');
+    removeCssVariable(this.chatOutlineTarget, '--blobio-chat-background');
+    applyHudOutline(this.chatOutlineTarget, { enabled: false });
     this.chatOutlineTarget = null;
 
     const leaderboard = this.document.querySelector?.('#leader-board-wrapper');
@@ -838,6 +852,9 @@ export class GameUiCustomizationFeature {
       'blobio-leaderboard-outline-enabled',
       'blobio-leaderboard-font-size-enabled',
     );
+    leaderboard?.classList?.remove('blobio-leaderboard-blur-enabled');
+    applyHudOutline(leaderboard, { enabled: false });
+    removeCssVariable(leaderboard, '--blobio-leaderboard-blur');
     removeCssVariable(leaderboard, '--blobio-leaderboard-background');
     removeCssVariable(leaderboard, '--blobio-leaderboard-outline');
     removeCssVariable(leaderboard, '--blobio-leaderboard-font-size');

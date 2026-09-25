@@ -1,8 +1,13 @@
+import { InGameWatermarkFeature } from './features/InGameWatermarkFeature.js';
 import backgroundUrl from '../assets/background.png';
 import discordIconUrl from '../assets/discord_icon.png';
 import facebookIconUrl from '../assets/facebook_icon.png';
 import instagramIconUrl from '../assets/instagram_icon.png';
-import socialsButtonUrl from '../assets/socal_icon_n.png';
+import socialsButtonUrl from '../assets/social_icon_n.png';
+import dailyTasksButtonUrl from '../assets/dailytasks.png';
+import cogwheelIconUrl from '../assets/cogwheel_icon.png';
+import dailyTaskCoinUrl from '../assets/daily_task_coin.png';
+import taskCompleteIconUrl from '../assets/task_complete_icon.png';
 import updatesButtonUrl from '../assets/update_notes_n_.png';
 import youtubeIconUrl from '../assets/youtube_icon.png';
 import recommendedButtonUrl from '../assets/yt_recommended_n.png';
@@ -24,6 +29,7 @@ import { readCellMassSettings } from './cellMass/CellMassSettings.js';
 import { migrateLegacySettingsCookies } from './storage/LegacySettingsCookies.js';
 import { pageCellMassBootstrap } from './cellMass/pageCellMassBootstrap.js';
 import { readCellRingSettings } from './cellRing/CellRingSettings.js';
+import { readCellBorderSyncSetting } from './cellRing/CellBorderSyncSettings.js';
 import { pageCellRingBootstrap } from './cellRing/pageCellRingBootstrap.js';
 import { readVirusPelletColorSettings } from './cellColors/VirusPelletColorSettings.js';
 import { pageVirusPelletColorsBootstrap } from './cellColors/pageVirusPelletColorsBootstrap.js';
@@ -36,19 +42,26 @@ import { BackgroundFeature } from './features/BackgroundFeature.js';
 import { CellPauseFeature } from './features/CellPauseFeature.js';
 import { ChatRoleFeature } from './features/ChatRoleFeature.js';
 import { ChatSettingsFeature } from './features/ChatSettingsFeature.js';
+import { MinimapAppearanceFeature } from './features/MinimapAppearanceFeature.js';
+import { KeystrokeHudFeature } from './features/KeystrokeHudFeature.js';
 import { FriendHighlightFeature } from './features/FriendHighlightFeature.js';
 import { GameUiCustomizationFeature } from './features/GameUiCustomizationFeature.js';
+import { ExitResultsFeature } from './features/ExitResultsFeature.js';
 import { HotkeyFeature } from './features/HotkeyFeature.js';
 import { MenuFeature } from './features/menu/MenuFeature.js';
 import { FriendHighlightStore } from './friends/FriendHighlightStore.js';
+import { readFriendMinimapSettings } from './friends/FriendMinimapSettings.js';
 import { FriendRelationService } from './friends/FriendRelationService.js';
 import { HotkeyStore } from './hotkeys/HotkeyStore.js';
 import { readHudInfoSettings } from './settings/HudInfoSettings.js';
 import { pageHudInfoBootstrap } from './hud/pageHudInfoBootstrap.js';
 import { pageUnicodeNamesBootstrap } from './names/pageUnicodeNamesBootstrap.js';
 import flagsFontUrl from '../assets/fonts/blobio-flags.woff2';
+import xpLevelStarUrl from '../assets/xp_level_star.png';
 import { readJellyShaderSettings } from './jelly/JellyShaderSettings.js';
 import { pageJellyShaderBootstrap } from './jelly/pageJellyShaderBootstrap.js';
+import { readLiquidJellySetting } from './jelly/LiquidJellySettings.js';
+import { pageLiquidJellyBootstrap } from './jelly/pageLiquidJellyBootstrap.js';
 import { PlayerMuteFeature } from './features/PlayerMuteFeature.js';
 import { ProfileClanTagFeature } from './features/ProfileClanTagFeature.js';
 import { VipBadgeFeature } from './features/VipBadgeFeature.js';
@@ -63,7 +76,7 @@ import { pageVirusMotherCellBootstrap } from './virus/pageVirusMotherCellBootstr
 import { pageRenderPerformanceBootstrap } from './performance/pageRenderPerformanceBootstrap.js';
 
 const INSTANCE_KEY = '__blobioExtension';
-const EXTENSION_VERSION = '0.2.96';
+const EXTENSION_VERSION = '0.7.5';
 const VIP_BADGE_URL = vipBadgeUrl;
 const EMOTE_SKIN_ASSETS = {
   cool: emoteCoolUrl,
@@ -115,6 +128,7 @@ class BlobioExtension {
 
     if (hostMode === 'runtime') {
       this.installEmoteSkinFallback(document, logger);
+      this.installLiquidJellyFallback(document, logger);
       this.installJellyShaderFallback(document, logger);
       this.installHudInfoFallback(document, logger);
       this.installCellMassFallback(document, logger);
@@ -123,6 +137,8 @@ class BlobioExtension {
       this.installVirusPelletColorsFallback(document, logger);
       this.installRenderPerformanceFallback(logger);
     }
+
+    this.features.push(new InGameWatermarkFeature({ document, version: EXTENSION_VERSION, frontPage: hostMode === 'frontpage' }));
 
     this.roleRegistry = new RoleRegistry({ document, logger });
     this.roleRegistry.start();
@@ -133,6 +149,10 @@ class BlobioExtension {
       recommendedButton: recommendedButtonUrl,
       updatesButton: updatesButtonUrl,
       socialsButton: socialsButtonUrl,
+      dailyTasksButton: dailyTasksButtonUrl,
+      cogwheelIcon: cogwheelIconUrl,
+      dailyTaskCoin: dailyTaskCoinUrl,
+      taskCompleteIcon: taskCompleteIconUrl,
       youtubeIcon: youtubeIconUrl,
       discordIcon: discordIconUrl,
       facebookIcon: facebookIconUrl,
@@ -185,12 +205,17 @@ class BlobioExtension {
         friendHighlightStore: this.friendHighlightStore,
       });
       const uiCustomization = new GameUiCustomizationFeature({ document, logger });
+      const keystrokeHud = new KeystrokeHudFeature({ document });
+      const minimapAppearance = new MinimapAppearanceFeature({ document });
       const chatSettings = new ChatSettingsFeature({
         document,
         logger,
         mutedPlayersStore: this.mutedPlayersStore,
         hotkeyStore: this.hotkeyStore,
         uiCustomization,
+        keystrokeHud,
+        minimapAppearance,
+        dailyTaskCoin: dailyTaskCoinUrl,
       });
 
       this.features.push(
@@ -214,6 +239,9 @@ class BlobioExtension {
         }),
         new CellPauseFeature({ document, logger }),
         uiCustomization,
+        new ExitResultsFeature({ document, starUrl: xpLevelStarUrl }),
+        keystrokeHud,
+        minimapAppearance,
         chatSettings,
         new EmoteSkinFeature({
           document,
@@ -329,6 +357,20 @@ class BlobioExtension {
     }
   }
 
+  installLiquidJellyFallback(document, logger) {
+    const pageWindow = getTampermonkeyPageWindow(this.window);
+    const storage = createBlobioStorage(document);
+    try {
+      return Boolean(pageLiquidJellyBootstrap({
+        enabled: readLiquidJellySetting(storage),
+        version: EXTENSION_VERSION,
+      }, pageWindow));
+    } catch (error) {
+      logger.warn?.('[Blobio] Liquid Jelly fallback failed.', error);
+      return false;
+    }
+  }
+
   installJellyShaderFallback(document, logger) {
     const windowRef = this.window;
     if (windowRef.__blobioJellyShaderInstalled) {
@@ -369,7 +411,15 @@ class BlobioExtension {
     const storage = createBlobioStorage(document);
     try {
       pageUnicodeNamesBootstrap(pageWindow, flagsFontUrl);
-      return Boolean(pageCellMassBootstrap(readCellMassSettings(storage, document), pageWindow));
+      const friendMinimap = readFriendMinimapSettings(storage);
+      return Boolean(pageCellMassBootstrap({
+        ...readCellMassSettings(storage, document),
+        friendMinimapName: friendMinimap.enabled,
+        friendMinimapColor: friendMinimap.color,
+        friendMinimapMode: friendMinimap.mode,
+        friendMinimapNameMode: friendMinimap.nameMode,
+        friendMinimapInGameColor: friendMinimap.inGameColor,
+      }, pageWindow));
     } catch (error) {
       logger.warn?.('[Blobio] Show mass fallback failed.', error);
       return false;
@@ -383,6 +433,7 @@ class BlobioExtension {
     try {
       return Boolean(pageCellRingBootstrap({
         ...readCellRingSettings(storage, document),
+        cellBorderSync: readCellBorderSyncSetting(storage),
         version: EXTENSION_VERSION,
       }, pageWindow));
     } catch (error) {
@@ -439,6 +490,7 @@ class BlobioExtension {
   }
 
   destroy() {
+    getTampermonkeyPageWindow(this.window)?.__blobioFriendMinimapDestroy?.();
     for (let index = this.features.length - 1; index >= 0; index -= 1) {
       this.features[index].destroy();
     }

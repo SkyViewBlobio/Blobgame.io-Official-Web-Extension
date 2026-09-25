@@ -64,6 +64,7 @@ export function pageVirusMotherCellBootstrap(initialConfig, pageWindow) {
     nonRotatedHighDetailDraws: 0,
     nonRotatedFallbackDraws: 0,
     rotateChecks: 0,
+    rotationCacheSize: 0,
     rotateMaskActive: settings.rotate,
     lastRotateMaskId: settings.maskId,
     glowTextureDraws: 0,
@@ -308,7 +309,11 @@ export function pageVirusMotherCellBootstrap(initialConfig, pageWindow) {
         hash = Math.imul(hash, 16777619);
       }
       const rotation = Math.abs(hash % 360);
+      if (rotations.size >= 4096) {
+        rotations.delete(rotations.keys().next().value);
+      }
       rotations.set(key, rotation);
+      state.rotationCacheSize = rotations.size;
       return rotation;
     };
     win.__blobVirusGlowGetDrawRotation = function getDrawRotation(id, x, y, sourceName) {
@@ -365,6 +370,7 @@ export function pageVirusMotherCellBootstrap(initialConfig, pageWindow) {
       glowTextureDraws: state.glowTextureDraws,
       rotationDraws: state.rotationDraws,
       rotationStateChecks: state.rotationStateChecks,
+      rotationCacheSize: state.rotationCacheSize,
       colorizerVirusCalls: state.colorizerVirusCalls,
       colorizerVirusApplied: state.colorizerVirusApplied,
       colorizerVirusMissing: state.colorizerVirusMissing,

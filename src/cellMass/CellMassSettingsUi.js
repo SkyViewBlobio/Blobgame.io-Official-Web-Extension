@@ -1,17 +1,13 @@
+import { getTampermonkeyPageWindow } from '../runtimePageWindow.js';
+import { createSettingsDrag } from '../ui/SettingsDrag.js';
+import { animateDisclosure } from '../ui/animateDisclosure.js';
 import {
-  CELL_MASS_MODE_PRESETS,
+  normalizeCellMassSettings,
   readCellMassSettings,
   saveCellMassSettings,
 } from './CellMassSettings.js';
 
 const DESCRIPTION = 'FPS-Impact: Low[1-10]\nShows mass numbers on your cells.';
-const MODE_ORDER = ['normal', 'vip', 'custom', 'dynamic'];
-const MODE_LABELS = {
-  normal: 'Normal',
-  vip: 'VIP/YT',
-  custom: 'Custom',
-  dynamic: 'Dynamic',
-};
 
 const CHECKBOXES = [
   { key: 'compact', label: 'Compact numbers' },
@@ -21,7 +17,6 @@ const CHECKBOXES = [
 
 const SLIDERS = [
   { key: 'textScale', label: 'Text-Scale', min: 0.35, max: 1.4, step: 0.01 },
-  { key: 'yOffset', label: 'Y-Offset', min: -120, max: 120, step: 1 },
   { key: 'nameGap', label: 'Name-Gap', min: 0.1, max: 3, step: 0.1 },
 ];
 
@@ -41,6 +36,13 @@ export class CellMassSettingsUi {
     this.hideTooltip = hideTooltip;
     this.onOpen = onOpen;
     this.settings = readCellMassSettings(storage, document);
+    this.drag = createSettingsDrag(document.defaultView || globalThis,
+      () => {
+        this.sync();
+        getTampermonkeyPageWindow(this.document.defaultView)?.__blobioCellMassRefresh?.(this.settings);
+      },
+      () => { this.settings = saveCellMassSettings(this.storage, this.settings, this.document); },
+    );
     this.listeners = [];
     this.elements = null;
   }
@@ -63,7 +65,6 @@ export class CellMassSettingsUi {
       enabled: row.querySelector('#config-switch-cell-mass'),
       arrowButton: row.querySelector('.blobio-cell-mass-dropdown-button'),
       disclosure: row.querySelector('.blobio-cell-mass-dropdown-symbol'),
-      modeButton: menu.querySelector('.blobio-cell-mass-preset-mode-button'),
       checkboxes: Array.from(menu.querySelectorAll('.blobio-cell-mass-checkbox-input') || []),
       sliders: Array.from(menu.querySelectorAll('.blobio-cell-mass-slider-input') || []),
       sliderValues: Array.from(menu.querySelectorAll('.blobio-cell-mass-slider-value') || []),
@@ -74,6 +75,7 @@ export class CellMassSettingsUi {
   }
 
   destroy() {
+    this.drag.flush();
     for (const [node, type, listener, options] of this.listeners) {
       node.removeEventListener?.(type, listener, options);
     }
@@ -151,8 +153,7 @@ export class CellMassSettingsUi {
     menu.append(
       this.createSectionTitle('Show mass settings'),
       ...CHECKBOXES.map((option) => this.createCheckboxRow(option)),
-      this.createSectionTitle('Offset/Scale'),
-      this.createModeRow(),
+      this.createSectionTitle('Text layout'),
       ...SLIDERS.map((slider) => this.createSliderRow(slider)),
       this.createSectionTitle('Update'),
       this.createUpdateDelayRow(),
@@ -188,40 +189,6 @@ export class CellMassSettingsUi {
     return row;
   }
 
-  createModeRow() {
-    const row = this.document.createElement('div');
-    row.classList.add('blobio-cell-mass-mode-row');
-
-    const label = this.document.createElement('span');
-    label.textContent = 'Mode';
-
-    const button = this.document.createElement('button');
-    button.type = 'button';
-    button.classList.add('blobio-cell-mass-preset-mode-button');
-    button.setAttribute('aria-label', 'Show mass offset and scale mode');
-
-    for (const mode of MODE_ORDER) {
-      const text = this.document.createElement('span');
-      text.classList.add('blobio-cell-mass-preset-mode-text', `is-${mode}`);
-      text.textContent = MODE_LABELS[mode];
-      button.appendChild(text);
-    }
-
-    row.append(label, button);
-    this.listen(button, 'click', (event) => {
-      event.preventDefault?.();
-      event.stopPropagation?.();
-      const nextMode = MODE_ORDER[(MODE_ORDER.indexOf(this.settings.mode) + 1) % MODE_ORDER.length];
-      this.settings = this.save({
-        mode: nextMode,
-        ...CELL_MASS_MODE_PRESETS[nextMode],
-      });
-      this.sync();
-    });
-
-    return row;
-  }
-
   createSliderRow({ key, label, min, max, step }) {
     const row = this.document.createElement('label');
     row.classList.add('blobio-cell-mass-slider-row');
@@ -243,9 +210,9 @@ export class CellMassSettingsUi {
 
     row.append(text, input, value);
     this.listen(input, 'input', () => {
-      this.settings = this.save({ [key]: Number(input.value) });
-      this.sync();
+      this.scheduleSave({ [key]: Number(input.value) });
     });
+    this.listen(input, 'change', () => this.drag.flush());
     return row;
   }
 
@@ -273,7 +240,13 @@ export class CellMassSettingsUi {
     this.listen(node, 'mouseleave', () => this.hideTooltip?.());
   }
 
+  scheduleSave(changes) {
+    this.settings = normalizeCellMassSettings({ ...this.settings, ...changes });
+    this.drag.schedule();
+  }
+
   save(changes) {
+    this.drag.flush();
     return saveCellMassSettings(this.storage, {
       ...this.settings,
       ...changes,
@@ -281,11 +254,12 @@ export class CellMassSettingsUi {
   }
 
   setOpen(open) {
+    if (!open) this.drag.flush();
     if (!this.elements) {
       return;
     }
 
-    this.elements.menu.hidden = !open;
+    animateDisclosure(this.elements.menu, open);
     this.elements.arrowButton.setAttribute('aria-expanded', String(open));
     this.elements.disclosure.textContent = open ? '-' : '+';
     this.elements.group.classList.toggle('is-open', open);
@@ -297,7 +271,6 @@ export class CellMassSettingsUi {
     }
 
     this.elements.enabled.checked = this.settings.enabled;
-    this.syncPresetModeButton();
 
     for (const input of this.elements.checkboxes) {
       input.checked = Boolean(this.settings[input.dataset.cellMassCheckbox]);
@@ -306,25 +279,14 @@ export class CellMassSettingsUi {
     for (const input of this.elements.sliders) {
       const key = input.dataset.cellMassSlider;
       input.value = String(this.settings[key]);
-      input.disabled = this.settings.mode === 'dynamic' && key === 'yOffset';
     }
 
     for (const value of this.elements.sliderValues) {
       const key = value.dataset.cellMassSlider;
-      value.textContent = key === 'yOffset' && this.settings.mode === 'dynamic'
-        ? 'Auto'
-        : key === 'updateDelayMs'
+      value.textContent = key === 'updateDelayMs'
         ? `${this.settings[key]}ms`
         : String(this.settings[key]);
     }
-  }
-
-  syncPresetModeButton() {
-    const modeButton = this.elements.modeButton;
-    modeButton.classList.toggle('is-normal', this.settings.mode === 'normal');
-    modeButton.classList.toggle('is-vip', this.settings.mode === 'vip');
-    modeButton.classList.toggle('is-custom', this.settings.mode === 'custom');
-    modeButton.classList.toggle('is-dynamic', this.settings.mode === 'dynamic');
   }
 
   listen(node, type, listener, options) {

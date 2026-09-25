@@ -1,5 +1,9 @@
+import { getTampermonkeyPageWindow } from '../runtimePageWindow.js';
+import { createSettingsDrag } from '../ui/SettingsDrag.js';
+import { animateDisclosure } from '../ui/animateDisclosure.js';
 import {
   gameBackgroundCss,
+  normalizeGameBackgroundSettings,
   readGameBackgroundSettings,
   saveGameBackgroundSettings,
 } from '../settings/GameBackgroundSettings.js';
@@ -20,6 +24,13 @@ export class GameBackgroundSettingsUi {
     this.hideTooltip = hideTooltip;
     this.onOpen = onOpen;
     this.settings = readGameBackgroundSettings(storage);
+    this.drag = createSettingsDrag(document.defaultView || globalThis,
+      () => {
+        this.sync();
+        getTampermonkeyPageWindow(this.document.defaultView)?.__blobioGameBackgroundRefresh?.(this.settings);
+      },
+      () => { this.settings = saveGameBackgroundSettings(this.storage, this.settings, this.document); },
+    );
     this.listeners = [];
     this.elements = null;
   }
@@ -58,6 +69,7 @@ export class GameBackgroundSettingsUi {
   }
 
   destroy() {
+    this.drag.flush();
     for (const [node, type, listener, options] of this.listeners) {
       node.removeEventListener?.(type, listener, options);
     }
@@ -230,13 +242,13 @@ export class GameBackgroundSettingsUi {
     row.append(colorControl, alphaControl);
 
     this.listen(colorInput, 'input', () => {
-      this.settings = this.save(this.colorChange(path, { color: colorInput.value }));
-      this.sync();
+      this.scheduleSave(this.colorChange(path, { color: colorInput.value }));
     });
+    this.listen(colorInput, 'change', () => this.drag.flush());
     this.listen(alphaInput, 'input', () => {
-      this.settings = this.save(this.colorChange(path, { alpha: alphaInput.value }));
-      this.sync();
+      this.scheduleSave(this.colorChange(path, { alpha: alphaInput.value }));
     });
+    this.listen(alphaInput, 'change', () => this.drag.flush());
 
     return row;
   }
@@ -260,14 +272,14 @@ export class GameBackgroundSettingsUi {
     row.append(title, input, value);
 
     this.listen(input, 'input', () => {
-      this.settings = this.save({
+      this.scheduleSave({
         gradient: {
           ...this.settings.gradient,
           angle: input.value,
         },
       });
-      this.sync();
     });
+    this.listen(input, 'change', () => this.drag.flush());
 
     return row;
   }
@@ -310,7 +322,13 @@ export class GameBackgroundSettingsUi {
     this.listen(node, 'mouseleave', () => this.hideTooltip?.());
   }
 
+  scheduleSave(changes) {
+    this.settings = normalizeGameBackgroundSettings({ ...this.settings, ...changes });
+    this.drag.schedule();
+  }
+
   save(changes) {
+    this.drag.flush();
     return saveGameBackgroundSettings(this.storage, {
       ...this.settings,
       ...changes,
@@ -326,11 +344,12 @@ export class GameBackgroundSettingsUi {
   }
 
   setOpen(open) {
+    if (!open) this.drag.flush();
     if (!this.elements) {
       return;
     }
 
-    this.elements.menu.hidden = !open;
+    animateDisclosure(this.elements.menu, open);
     this.elements.arrowButton.setAttribute('aria-expanded', String(open));
     this.elements.disclosure.textContent = open ? '-' : '+';
     this.elements.group.classList.toggle('is-open', open);

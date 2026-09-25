@@ -76,11 +76,7 @@ html.${this.className},
 body.${this.className} {
   min-height: 100%;
   background-color: #050607 !important;
-  background-image: url("${this.backgroundUrl}") !important;
-  background-position: center center !important;
-  background-repeat: no-repeat !important;
-  background-size: cover !important;
-  background-attachment: fixed !important;
+  background-image: none !important;
 }
 
 html.${this.className} body {
@@ -89,10 +85,20 @@ html.${this.className} body {
 
 html.${this.className} .wrapper,
 body.${this.className} .wrapper {
-  background-image: url("${this.backgroundUrl}") !important;
-  background-position: center center !important;
-  background-repeat: no-repeat !important;
-  background-size: cover !important;
+  background: transparent !important;
+}
+
+html.${this.className} body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: url("${this.backgroundUrl}");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  transform: translateZ(0);
 }
 
 html.${this.className} body::before {

@@ -1,3 +1,4 @@
+import { animateDisclosure } from '../ui/animateDisclosure.js';
 import {
   readJellyShaderSettings,
   saveJellyShaderSettings,
@@ -181,7 +182,7 @@ export class JellyShaderSettingsUi {
     if (!this.elements) {
       return;
     }
-    this.elements.menu.hidden = !open;
+    animateDisclosure(this.elements.menu, open);
     this.elements.arrowButton.setAttribute('aria-expanded', String(open));
     this.elements.disclosure.textContent = open ? '-' : '+';
     this.elements.group.classList.toggle('is-open', open);

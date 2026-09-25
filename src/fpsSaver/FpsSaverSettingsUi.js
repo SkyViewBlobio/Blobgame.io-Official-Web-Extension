@@ -1,4 +1,8 @@
+import { getTampermonkeyPageWindow } from '../runtimePageWindow.js';
+import { createSettingsDrag } from '../ui/SettingsDrag.js';
+import { animateDisclosure } from '../ui/animateDisclosure.js';
 import {
+  normalizeFpsSaverSettings,
   readFpsSaverSettings,
   saveFpsSaverSettings,
 } from './FpsSaverSettings.js';
@@ -57,6 +61,13 @@ export class FpsSaverSettingsUi {
     this.hideTooltip = hideTooltip;
     this.onOpen = onOpen;
     this.settings = readFpsSaverSettings(storage, document);
+    this.drag = createSettingsDrag(document.defaultView || globalThis,
+      () => {
+        this.sync();
+        getTampermonkeyPageWindow(this.document.defaultView)?.__blobioFpsSaverRefresh?.(this.settings);
+      },
+      () => { this.settings = saveFpsSaverSettings(this.storage, this.settings, this.document); },
+    );
     this.listeners = [];
     this.elements = {
       groups: [],
@@ -64,22 +75,12 @@ export class FpsSaverSettingsUi {
       checkboxes: [],
       sliders: [],
       sliderValues: [],
-      disclosureButtons: [],
     };
   }
 
   create() {
     this.destroy();
     this.settings = readFpsSaverSettings(this.storage, this.document);
-    this.elements = {
-      groups: [],
-      menus: [],
-      checkboxes: [],
-      sliders: [],
-      sliderValues: [],
-      disclosureButtons: [],
-    };
-
     const groups = [
       this.createHiddenTabGroup(),
       this.createObjectRendererGroup(),
@@ -90,6 +91,7 @@ export class FpsSaverSettingsUi {
   }
 
   destroy() {
+    this.drag.flush();
     for (const [node, type, listener, options] of this.listeners) {
       node.removeEventListener?.(type, listener, options);
     }
@@ -103,7 +105,6 @@ export class FpsSaverSettingsUi {
       checkboxes: [],
       sliders: [],
       sliderValues: [],
-      disclosureButtons: [],
     };
   }
 
@@ -218,7 +219,6 @@ export class FpsSaverSettingsUi {
     });
 
     this.elements.checkboxes.push(checkbox);
-    this.elements.disclosureButtons.push(arrowButton);
     return row;
   }
 
@@ -287,9 +287,9 @@ export class FpsSaverSettingsUi {
 
     row.append(text, input, value);
     this.listen(input, 'input', () => {
-      this.settings = this.save({ [key]: Number(input.value) });
-      this.sync();
+      this.scheduleSave({ [key]: Number(input.value) });
     });
+    this.listen(input, 'change', () => this.drag.flush());
     this.elements.sliders.push(input);
     this.elements.sliderValues.push(value);
     return row;
@@ -302,6 +302,7 @@ export class FpsSaverSettingsUi {
   }
 
   setOpen(open) {
+    if (!open) this.drag.flush();
     for (const menu of this.elements?.menus || []) {
       const row = menu.__blobioFpsSaverRow || menu.previousSibling;
       this.setMenuOpen(row, menu, Boolean(open));
@@ -312,7 +313,7 @@ export class FpsSaverSettingsUi {
     if (!row || !menu) {
       return;
     }
-    menu.hidden = !open;
+    animateDisclosure(menu, open);
     const button = row.querySelector?.('.blobio-fps-saver-dropdown-button');
     const symbol = row.querySelector?.('.blobio-fps-saver-dropdown-symbol');
     button?.setAttribute('aria-expanded', String(open));
@@ -322,10 +323,7 @@ export class FpsSaverSettingsUi {
   }
 
   sync() {
-    this.settings = {
-      ...this.settings,
-      ...readFpsSaverSettings(this.storage, this.document),
-    };
+    if (!this.drag.pending) this.settings = readFpsSaverSettings(this.storage, this.document);
 
     for (const input of this.elements?.checkboxes || []) {
       const key = input.dataset?.fpsSaverCheckbox;
@@ -349,7 +347,13 @@ export class FpsSaverSettingsUi {
     }
   }
 
+  scheduleSave(changes) {
+    this.settings = normalizeFpsSaverSettings({ ...this.settings, ...changes });
+    this.drag.schedule();
+  }
+
   save(changes) {
+    this.drag.flush();
     return saveFpsSaverSettings(this.storage, {
       ...this.settings,
       ...changes,

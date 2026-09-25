@@ -1,24 +1,13 @@
 export const CELL_MASS_SNAPSHOT_KEY = 'blobio.settings.cellMass.snapshot';
 export const CELL_MASS_COOKIE_NAME = 'blobioCellMass';
 
-export const CELL_MASS_MODE_PRESETS = Object.freeze({
-  normal: Object.freeze({ textScale: 0.65, yOffset: 10, nameGap: 1.2 }),
-  vip: Object.freeze({ textScale: 0.65, yOffset: -80, nameGap: 0.3 }),
-  custom: Object.freeze({ textScale: 0.65, yOffset: 11, nameGap: 1.1 }),
-  dynamic: Object.freeze({ textScale: 0.65, yOffset: 0, nameGap: 0.3 }),
-});
-
-export const CELL_MASS_MODES = Object.freeze(['normal', 'vip', 'custom', 'dynamic']);
-
 export const DEFAULT_CELL_MASS_SETTINGS = Object.freeze({
   enabled: true,
   compact: true,
   smartRendering: true,
   emphasizeBiggest: true,
-  mode: 'normal',
   textScale: 0.65,
-  yOffset: 10,
-  nameGap: 1.2,
+  nameGap: 0.3,
   updateDelayMs: 3000,
 });
 
@@ -81,8 +70,6 @@ export function readCellMassCookie(document = globalThis.document) {
 
 export function normalizeCellMassSettings(settings = {}) {
   const source = settings && typeof settings === 'object' ? settings : {};
-  const mode = normalizeMode(source.mode);
-  const preset = CELL_MASS_MODE_PRESETS[mode];
 
   return {
     enabled: source.enabled === undefined ? DEFAULT_CELL_MASS_SETTINGS.enabled : Boolean(source.enabled),
@@ -93,17 +80,10 @@ export function normalizeCellMassSettings(settings = {}) {
     emphasizeBiggest: source.emphasizeBiggest === undefined
       ? DEFAULT_CELL_MASS_SETTINGS.emphasizeBiggest
       : Boolean(source.emphasizeBiggest),
-    mode,
-    textScale: clampNumber(source.textScale, 0.35, 1.4, preset.textScale),
-    yOffset: clampNumber(source.yOffset, -120, 120, preset.yOffset),
-    nameGap: clampNumber(source.nameGap, 0.1, 3, preset.nameGap),
+    textScale: clampNumber(source.textScale, 0.35, 1.4, DEFAULT_CELL_MASS_SETTINGS.textScale),
+    nameGap: clampNumber(source.nameGap, 0.1, 3, DEFAULT_CELL_MASS_SETTINGS.nameGap),
     updateDelayMs: Math.round(clampNumber(source.updateDelayMs, 0, 10000, DEFAULT_CELL_MASS_SETTINGS.updateDelayMs)),
   };
-}
-
-function normalizeMode(value) {
-  const mode = String(value || '').trim().toLowerCase();
-  return CELL_MASS_MODES.includes(mode) ? mode : DEFAULT_CELL_MASS_SETTINGS.mode;
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -114,10 +94,15 @@ function clampNumber(value, min, max, fallback) {
   return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
 }
 
-function chooseNewestSnapshot(...snapshots) {
-  return snapshots
-    .filter(Boolean)
-    .sort((left, right) => normalizeUpdatedAt(right.updatedAt) - normalizeUpdatedAt(left.updatedAt))[0] || null;
+function chooseNewestSnapshot(storedSnapshot, cookieSnapshot) {
+  if (!storedSnapshot) {
+    return cookieSnapshot;
+  }
+  if (!cookieSnapshot) {
+    return storedSnapshot;
+  }
+  return normalizeUpdatedAt(cookieSnapshot.updatedAt) > normalizeUpdatedAt(storedSnapshot.updatedAt)
+    ? cookieSnapshot : storedSnapshot;
 }
 
 function normalizeUpdatedAt(value) {

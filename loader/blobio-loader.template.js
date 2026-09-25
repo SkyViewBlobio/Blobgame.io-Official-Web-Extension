@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blobio Web Script Loader
 // @namespace    https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-
-// @version      0.2.96
+// @version      0.7.5
 // @author       SkyView
 // @description  Loads the Blobio extension bundle from GitHub.
 // @match        *://blobgame.io/*
@@ -32,13 +32,21 @@
   'use strict';
 
   const LOG_PREFIX = '[Blobio]';
-  const VERSION = '0.2.96';
+  const VERSION = '0.7.5';
   const CUSTOM_CLIENT_HOST = 'custom.client.blobgame.io';
   const CAPTCHA_LOGO_HIDDEN_KEY = 'blobio.chat.hideCaptchaLogo';
   const RECAPTCHA_FRAME_HOSTS = new Set(['www.google.com', 'www.recaptcha.net']);
   const STORAGE_BRIDGE_SOURCE = 'BlobioExtensionStorageBridge';
+  const CONFIG_APPLIED_KEY = 'blobio.settings.configApplied';
   const REMOTE_TEXT_BRIDGE_KEY = '__blobioFetchRemoteText';
   const FPS_UNCAP_STORAGE_KEY = 'blobio.settings.fpsUncap';
+  const FRIEND_MINIMAP_KEYS = {
+    enabled: 'blobio.settings.friendMinimapName',
+    color: 'blobio.settings.friendMinimapName.color',
+    mode: 'blobio.settings.friendMinimapName.mode',
+    nameMode: 'blobio.settings.friendMinimapName.nameMode',
+    inGameColor: 'blobio.settings.friendMinimapName.inGameColor',
+  };
   const ANIMATION_SPEED_KEYS = {
     enabled: 'blobio.settings.animationSpeed.enabled',
     slider: 'blobio.settings.animationSpeed.slider',
@@ -49,6 +57,7 @@
     skinCells: 'blobio.settings.jellyShader.skinCells',
     noSkinCells: 'blobio.settings.jellyShader.noSkinCells',
   };
+  const LIQUID_JELLY_KEY = 'blobio.settings.liquidJelly.enabled';
   const CLAN_TEXT_KEYS = {
     enabled: 'blobio.roles.clanText.enabled',
     showProfileName: 'blobio.roles.clanText.showProfileName',
@@ -114,9 +123,12 @@
     alpha: 'blobio.settings.cellRing.alpha',
     glowSize: 'blobio.settings.cellRing.glowSize',
     borderWidth: 'blobio.settings.cellRing.borderWidth',
+    outlineColor: 'blobio.settings.cellRing.outline.color',
+    outlineAlpha: 'blobio.settings.cellRing.outline.alpha',
     transparentCell: 'blobio.settings.cellRing.transparentCell.enabled',
     cellAlpha: 'blobio.settings.cellRing.transparentCell.alpha',
     nameStyle: 'blobio.settings.cellRing.preview.nameStyle',
+    removeOwnCellBorder: 'blobio.settings.cellRing.removeOwnCellBorder',
     removeAllCellBorders: 'blobio.settings.cellRing.removeAllCellBorders',
     sideGlowMode: 'blobio.settings.cellRing.sideGlow.mode',
     sideGlowColor: 'blobio.settings.cellRing.sideGlow.color',
@@ -125,6 +137,7 @@
   };
   const CELL_RING_SNAPSHOT_KEY = 'blobio.settings.cellRing.snapshot';
   const CELL_RING_COOKIE_NAME = 'blobioCellRing';
+  const CELL_BORDER_SYNC_KEY = 'blobio.settings.cellBorderSync.enabled';
   const VIRUS_PELLET_COLOR_SNAPSHOT_KEY = 'blobio.settings.virusPelletColors.snapshot';
   const VIRUS_PELLET_COLOR_COOKIE_NAME = 'blobioVirusPelletColors';
   const CELL_MASS_SNAPSHOT_KEY = 'blobio.settings.cellMass.snapshot';
@@ -140,7 +153,7 @@
   const CELL_PAUSE_RUNTIME_KEY = '__blobioCellPauseRuntime';
   const CELL_PAUSE_STATE_KEY = '__blobioCellPauseState';
   const CELL_PAUSE_MOVEMENT_GATE_KEY = '__blobioCellPauseMovementGateInstalled';
-  const CELL_PAUSE_RUNTIME_VERSION = '0.2.89';
+  const CELL_PAUSE_RUNTIME_VERSION = '0.2.90';
 
   function isRecaptchaAnchorFrame() {
     return RECAPTCHA_FRAME_HOSTS.has(location.hostname)
@@ -759,7 +772,19 @@
       }
     } catch {}
 
-    return getLocalValue(key);
+    if (key !== CONFIG_APPLIED_KEY && key !== 'blobio.roles.vipCache'
+      && key !== 'blobio.roles.adminCache' && key !== 'blobio.roles.clanCache') {
+      try {
+        if (GM_getValue?.(CONFIG_APPLIED_KEY, undefined) === '1') return null;
+      } catch {}
+    }
+
+    const localValue = getLocalValue(key);
+    if (localValue !== null && (String(key).startsWith('blobio.controls.')
+      || String(key).startsWith('blobio.emoteSkin.'))) {
+      setSharedValue(key, localValue);
+    }
+    return localValue;
   }
 
   function setSharedValue(key, value) {
@@ -805,6 +830,13 @@
       slider,
       speed: enabled ? slider / 10 : 1,
       mode: normalizeAnimationSpeedMode(getSharedValue(ANIMATION_SPEED_KEYS.mode)),
+    };
+  }
+
+  function readLiquidJellyRuntimeSettings() {
+    return {
+      enabled: readBooleanValue(getSharedValue(LIQUID_JELLY_KEY), false),
+      version: VERSION,
     };
   }
 
@@ -969,14 +1001,12 @@
       updatedAt: 0,
     });
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'individual-values', value: individual };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'individual-values', value: individual };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(VIRUS_MOTHER_CELL_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
@@ -1003,11 +1033,13 @@
     const rawAlpha = Number(value.alpha ?? value.sideGlowAlpha);
     const rawGlowSize = Number(value.glowSize);
     const rawBorderWidth = Number(value.borderWidth);
+    const rawOutlineColor = String(value.outlineColor || '').toLowerCase();
+    const rawOutlineAlpha = Number(value.outlineAlpha);
     const rawCellAlpha = Number(value.cellAlpha);
     const rawNameStyle = String(value.nameStyle || 'normal').toLowerCase();
     const updatedAt = Number(value.updatedAt);
     return {
-      enabled: value.enabled === undefined ? true : readBooleanValue(value.enabled),
+      enabled: value.enabled === undefined ? false : readBooleanValue(value.enabled),
       mode: rawMode === 'solid' ? 'solid' : 'sync',
       solidColor: /^#[0-9a-f]{6}$/.test(rawSolidColor) ? rawSolidColor : '#19e6ff',
       alpha: Number.isFinite(rawAlpha) ? Math.max(0, Math.min(1, rawAlpha)) : 0.72,
@@ -1015,9 +1047,13 @@
         ? 1 : Math.max(0.25, Math.min(3, Math.round(rawGlowSize * 100) / 100)),
       borderWidth: value.borderWidth === null || value.borderWidth === undefined || value.borderWidth === '' || !Number.isFinite(rawBorderWidth)
         ? 1 : Math.max(0, Math.min(6, Math.round(rawBorderWidth * 4) / 4)),
+      outlineColor: /^#[0-9a-f]{6}$/.test(rawOutlineColor) ? rawOutlineColor : null,
+      outlineAlpha: value.outlineAlpha === null || value.outlineAlpha === undefined || value.outlineAlpha === '' || !Number.isFinite(rawOutlineAlpha)
+        ? null : Math.max(0, Math.min(1, rawOutlineAlpha)),
       transparentCell: readBooleanValue(value.transparentCell),
       cellAlpha: Number.isFinite(rawCellAlpha) ? Math.max(0, Math.min(1, rawCellAlpha)) : 0.75,
       nameStyle: ['normal', 'vip', 'yt'].includes(rawNameStyle) ? rawNameStyle : 'normal',
+      removeOwnCellBorder: readBooleanValue(value.removeOwnCellBorder),
       removeAllCellBorders: readBooleanValue(value.removeAllCellBorders ?? value.disabledCellRings),
       updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0,
     };
@@ -1040,32 +1076,34 @@
     const cookieSnapshotRaw = getCookieValue(CELL_RING_COOKIE_NAME);
     const cookieSnapshot = parseCellRingSnapshot(cookieSnapshotRaw);
     const individual = normalizeCellRingSnapshot({
-      enabled: readBooleanValue(getSharedValue(CELL_RING_KEYS.enabled), true),
+      enabled: readBooleanValue(getSharedValue(CELL_RING_KEYS.enabled), false),
       mode: getSharedValue(CELL_RING_KEYS.mode) || getSharedValue(CELL_RING_KEYS.sideGlowMode),
       solidColor: getSharedValue(CELL_RING_KEYS.solidColor) || getSharedValue(CELL_RING_KEYS.sideGlowColor),
       alpha: getSharedValue(CELL_RING_KEYS.alpha) ?? getSharedValue(CELL_RING_KEYS.sideGlowAlpha),
       glowSize: getSharedValue(CELL_RING_KEYS.glowSize),
       borderWidth: getSharedValue(CELL_RING_KEYS.borderWidth),
+      outlineColor: getSharedValue(CELL_RING_KEYS.outlineColor),
+      outlineAlpha: getSharedValue(CELL_RING_KEYS.outlineAlpha),
       transparentCell: readBooleanValue(getSharedValue(CELL_RING_KEYS.transparentCell)),
       cellAlpha: getSharedValue(CELL_RING_KEYS.cellAlpha),
       nameStyle: getSharedValue(CELL_RING_KEYS.nameStyle),
+      removeOwnCellBorder: readBooleanValue(getSharedValue(CELL_RING_KEYS.removeOwnCellBorder)),
       removeAllCellBorders: readBooleanValue(getSharedValue(CELL_RING_KEYS.removeAllCellBorders) ?? getSharedValue(CELL_RING_KEYS.disabledCellRings)),
       updatedAt: 0,
     });
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'individual-values', value: individual };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'individual-values', value: individual };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(CELL_RING_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
     return {
       ...selected.value,
+      cellBorderSync: readBooleanValue(getSharedValue(CELL_BORDER_SYNC_KEY), true),
       source: selected.source,
       diagnostics: {
         sharedSnapshotPresent: Boolean(sharedSnapshot),
@@ -1156,14 +1194,12 @@
     const cookieSnapshot = parseVirusPelletColorRuntimeSnapshot(cookieSnapshotRaw);
     const fallback = normalizeVirusPelletColorRuntimeSnapshot(DEFAULT_VIRUS_PELLET_COLOR_RUNTIME_SETTINGS);
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'defaults', value: fallback };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'defaults', value: fallback };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(VIRUS_PELLET_COLOR_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
@@ -1184,10 +1220,8 @@
     compact: true,
     smartRendering: true,
     emphasizeBiggest: true,
-    mode: 'normal',
     textScale: 0.65,
-    yOffset: 10,
-    nameGap: 1.2,
+    nameGap: 0.3,
     updateDelayMs: 3000,
   };
 
@@ -1202,9 +1236,7 @@
       compact: value.compact === undefined ? DEFAULT_CELL_MASS_RUNTIME_SETTINGS.compact : readBooleanValue(value.compact),
       smartRendering: value.smartRendering === undefined ? DEFAULT_CELL_MASS_RUNTIME_SETTINGS.smartRendering : readBooleanValue(value.smartRendering),
       emphasizeBiggest: value.emphasizeBiggest === undefined ? DEFAULT_CELL_MASS_RUNTIME_SETTINGS.emphasizeBiggest : readBooleanValue(value.emphasizeBiggest),
-      mode: ['normal', 'vip', 'custom', 'dynamic'].includes(value.mode) ? value.mode : DEFAULT_CELL_MASS_RUNTIME_SETTINGS.mode,
       textScale: normalizeHudInfoRuntimeNumber(value.textScale, 0.35, 1.4, DEFAULT_CELL_MASS_RUNTIME_SETTINGS.textScale),
-      yOffset: normalizeHudInfoRuntimeNumber(value.yOffset, -120, 120, DEFAULT_CELL_MASS_RUNTIME_SETTINGS.yOffset),
       nameGap: normalizeHudInfoRuntimeNumber(value.nameGap, 0.1, 3, DEFAULT_CELL_MASS_RUNTIME_SETTINGS.nameGap),
       updateDelayMs: Math.round(normalizeHudInfoRuntimeNumber(value.updateDelayMs, 0, 10000, DEFAULT_CELL_MASS_RUNTIME_SETTINGS.updateDelayMs)),
       updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0,
@@ -1229,14 +1261,12 @@
     const cookieSnapshot = parseCellMassRuntimeSnapshot(cookieSnapshotRaw);
     const fallback = normalizeCellMassRuntimeSnapshot(DEFAULT_CELL_MASS_RUNTIME_SETTINGS);
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'defaults', value: fallback };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'defaults', value: fallback };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(CELL_MASS_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
@@ -1310,14 +1340,12 @@
     const cookieSnapshot = parseFpsSaverRuntimeSnapshot(cookieSnapshotRaw);
     const fallback = normalizeFpsSaverRuntimeSnapshot(DEFAULT_FPS_SAVER_RUNTIME_SETTINGS);
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'defaults', value: fallback };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'defaults', value: fallback };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(FPS_SAVER_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
@@ -1337,7 +1365,9 @@
     const value = String(key || '');
     return value.startsWith('blobio.roles.')
       || value.startsWith('blobio.settings.')
-      || value.startsWith('blobio.chat.');
+      || value.startsWith('blobio.chat.')
+      || value.startsWith('blobio.controls.')
+      || value.startsWith('blobio.emoteSkin.');
   }
 
   function installExtensionInputKeyboardIsolation() {
@@ -1577,7 +1607,8 @@
         return Boolean(state.paused);
       },
       shouldBlockEvent(event) {
-        if (!state.paused || event?.__blobioCellPauseSynthetic) {
+        if (!state.paused || event?.__blobioCellPauseSynthetic
+          || event?.target?.matches?.('input[type="range"]')) {
           return false;
         }
 
@@ -3229,10 +3260,8 @@
       preserveCameraZoom: true,
       cameraDeltaFloor: 0.003000000026077032,
       cameraSmoothingEnabled: true,
-      cameraDeltaMinSeconds: 1 / 360,
-      cameraDeltaMaxSeconds: 1 / 90,
-      cameraDeltaBlend: 0.18,
-      cameraDeltaMaxStepSeconds: 1 / 650,
+      cameraDeltaMaxSeconds: 0.05,
+      cameraResponseScale: 0.5,
       minCameraDeltaSeconds: 0.0001,
       keepVisible: true,
       log: false,
@@ -3288,7 +3317,6 @@
     let insideFrameCallback = false;
     let lastFrameTime = 0;
     let currentFrameDeltaSeconds = 1 / 240;
-    let currentCameraDeltaSeconds = 1 / 240;
     let messageChannel = null;
 
     function isActive() {
@@ -3306,27 +3334,15 @@
       lastFrameTime = frameTime;
       insideFrameCallback = true;
       state.currentFrameDeltaSeconds = currentFrameDeltaSeconds;
-      currentCameraDeltaSeconds = updateCameraDelta(currentFrameDeltaSeconds);
       return frameTime;
     }
 
     function updateCameraDelta(rawDeltaSeconds) {
-      const target = native.mathMax(
-        config.cameraDeltaMinSeconds,
-        native.mathMin(config.cameraDeltaMaxSeconds, Number(rawDeltaSeconds) || 1 / 240),
-      );
-
-      if (!config.cameraSmoothingEnabled) {
-        state.smoothedCameraDeltaSeconds = target;
-        return target;
-      }
-
-      const previous = Number(state.smoothedCameraDeltaSeconds) || target;
-      const blend = native.mathMax(0.01, native.mathMin(1, Number(config.cameraDeltaBlend) || 0.18));
-      const maxStep = native.mathMax(0.0001, Number(config.cameraDeltaMaxStepSeconds) || 1 / 650);
-      const blended = previous + (target - previous) * blend;
-      const diff = native.mathMax(-maxStep, native.mathMin(maxStep, blended - previous));
-      const next = previous + diff;
+      // Use the game's delta, not intervals between unrelated animation callbacks.
+      // A per-frame minimum or moving average accelerates the camera at high FPS.
+      const delta = native.mathMax(1e-9, native.mathMin(config.cameraDeltaMaxSeconds, rawDeltaSeconds));
+      const scale = config.cameraSmoothingEnabled ? config.cameraResponseScale : 1;
+      const next = delta * scale;
       state.smoothedCameraDeltaSeconds = next;
       return next;
     }
@@ -3349,10 +3365,10 @@
           && typeof arguments[0] === 'number'
           && typeof arguments[1] === 'number'
           && arguments[0] >= 0
-          && arguments[0] < config.cameraDeltaFloor
+          && Number.isFinite(arguments[0])
           && native.mathAbs(arguments[1] - config.cameraDeltaFloor) < 1e-12
         ) {
-          return currentCameraDeltaSeconds;
+          return updateCameraDelta(arguments[0]);
         }
 
         return originalMax.apply(win.Math, arguments);
@@ -3660,6 +3676,9 @@
   /* VIRUS_PELLET_COLOR_RUNTIME_START */
   /* VIRUS_PELLET_COLOR_RUNTIME_END */
 
+  /* LIQUID_JELLY_RUNTIME_START */
+  /* LIQUID_JELLY_RUNTIME_END */
+
   /* JELLY_SHADER_RUNTIME_START */
   /* JELLY_SHADER_RUNTIME_END */
 
@@ -3938,6 +3957,41 @@
     });
   }
 
+  function installLiquidJellyRuntime() {
+    if (location.hostname !== CUSTOM_CLIENT_HOST) {
+      return;
+    }
+
+    const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    try {
+      pageLiquidJellyBootstrap(readLiquidJellyRuntimeSettings(), pageWindow);
+    } catch (error) {
+      logError('Failed to install Liquid Jelly runtime.', error);
+      return;
+    }
+
+    const refresh = () => {
+      try {
+        pageWindow.__blobioLiquidJellyRefresh?.(readLiquidJellyRuntimeSettings());
+      } catch (error) {
+        logError('Failed to refresh Liquid Jelly runtime.', error);
+      }
+    };
+
+    if (typeof GM_addValueChangeListener === 'function') {
+      try {
+        GM_addValueChangeListener(LIQUID_JELLY_KEY, refresh);
+      } catch {}
+    }
+
+    window.addEventListener?.('message', (event) => {
+      const message = event.data;
+      if (message?.source === STORAGE_BRIDGE_SOURCE && message.key === LIQUID_JELLY_KEY) {
+        refresh();
+      }
+    });
+  }
+
   function installJellyShaderRuntime() {
     if (location.hostname !== CUSTOM_CLIENT_HOST) {
       return;
@@ -4025,7 +4079,10 @@
 
     try {
       pageUnicodeNamesBootstrap(pageWindow, UNICODE_NAME_ASSETS.flags);
-      pageCellMassBootstrap(readCellMassRuntimeSettings(), pageWindow);
+      pageCellMassBootstrap({
+        ...readCellMassRuntimeSettings(),
+        ...readFriendMinimapRuntimeSettings(),
+      }, pageWindow);
     } catch (error) {
       logError('Failed to install Show mass runtime.', error);
       return;
@@ -4033,7 +4090,10 @@
 
     const refresh = () => {
       try {
-        pageWindow.__blobioCellMassRefresh?.(readCellMassRuntimeSettings());
+        pageWindow.__blobioCellMassRefresh?.({
+          ...readCellMassRuntimeSettings(),
+          ...readFriendMinimapRuntimeSettings(),
+        });
       } catch (error) {
         logError('Failed to refresh Show mass runtime.', error);
       }
@@ -4043,14 +4103,32 @@
       try {
         GM_addValueChangeListener(CELL_MASS_SNAPSHOT_KEY, refresh);
       } catch {}
+      for (const key of Object.values(FRIEND_MINIMAP_KEYS)) {
+        try {
+          GM_addValueChangeListener(key, refresh);
+        } catch {}
+      }
     }
 
     window.addEventListener?.('message', (event) => {
       const message = event.data;
-      if (message?.source === STORAGE_BRIDGE_SOURCE && message.key === CELL_MASS_SNAPSHOT_KEY) {
+      if (message?.source === STORAGE_BRIDGE_SOURCE
+        && (message.key === CELL_MASS_SNAPSHOT_KEY || Object.values(FRIEND_MINIMAP_KEYS).includes(message.key))) {
         refresh();
       }
     });
+  }
+
+  function readFriendMinimapRuntimeSettings() {
+    const color = String(getSharedValue(FRIEND_MINIMAP_KEYS.color) || '');
+    const inGameColor = String(getSharedValue(FRIEND_MINIMAP_KEYS.inGameColor) || '');
+    return {
+      friendMinimapName: readBooleanValue(getSharedValue(FRIEND_MINIMAP_KEYS.enabled), true),
+      friendMinimapColor: /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : '#ffffff',
+      friendMinimapMode: getSharedValue(FRIEND_MINIMAP_KEYS.mode) === 'bracket' ? 'bracket' : 'normal',
+      friendMinimapNameMode: getSharedValue(FRIEND_MINIMAP_KEYS.nameMode) === 'onlyProfile' ? 'onlyProfile' : 'both',
+      friendMinimapInGameColor: /^#[0-9a-f]{6}$/i.test(inGameColor) ? inGameColor.toLowerCase() : '#ffffff',
+    };
   }
 
   function installGameBackgroundRuntime() {
@@ -4164,12 +4242,14 @@
     if (typeof GM_addValueChangeListener === 'function') {
       try {
         GM_addValueChangeListener(CELL_RING_SNAPSHOT_KEY, refresh);
+        GM_addValueChangeListener(CELL_BORDER_SYNC_KEY, refresh);
       } catch {}
     }
 
     window.addEventListener?.('message', (event) => {
       const message = event.data;
-      if (message?.source === STORAGE_BRIDGE_SOURCE && message.key === CELL_RING_SNAPSHOT_KEY) {
+      if (message?.source === STORAGE_BRIDGE_SOURCE
+          && (message.key === CELL_RING_SNAPSHOT_KEY || message.key === CELL_BORDER_SYNC_KEY)) {
         refresh();
       }
     });
@@ -4261,9 +4341,6 @@
       run();
     } catch (error) {
       if (error?.name === 'EvalError' && runBundleWithScriptElement(source, probeId)) {
-        if (isBundleExecutionProbeSet(probeId)) {
-          return;
-        }
         return;
       }
       logError('Failed to run extension bundle.', error);
@@ -4330,6 +4407,7 @@
   installSharedStorageBridge();
   migrateLegacySettingsCookies(document, { getItem: getSharedValue, setItem: setSharedValue });
   installClanTextRuntimeRefresh();
+  installLiquidJellyRuntime();
   installCellRingRuntime();
   installFpsSaverRuntime();
   installEmoteSkinRuntime();

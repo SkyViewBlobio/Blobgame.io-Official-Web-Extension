@@ -1,7 +1,7 @@
 export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalThis) {
   const win = pageWindow || globalThis;
-  const SCRIPT_VERSION = '0.2.96-glow-falloff-v24';
-  const PATCH_REVISION = 'native-glow-falloff-v24';
+  const SCRIPT_VERSION = '0.4.1-cell-border-sync-v28';
+  const PATCH_REVISION = 'cell-border-sync-v28';
   const host = String(win.location?.hostname || '').toLowerCase();
   if (host && host !== 'custom.client.blobgame.io' && host !== 'blobgame.io') {
     return false;
@@ -19,7 +19,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     win.__blobioCellRingRefresh?.(initialSettings);
     if (!previousState.reloadRequired) {
       previousState.reloadRequired = true;
-      win.console?.warn?.('[Blobio Glow] Update your Blobio loader and reload: the early loader and bundle have different renderer revisions.');
+      win.console?.warn?.('[Blobio Glow] Update loader/blobio-loader.user.js from the official public repository and reload: the early loader and bundle have different renderer revisions.');
     }
     return true;
   }
@@ -38,13 +38,11 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     HAS_BORDER: 242,
   });
   const RESERVED_SHADER_ALPHA_CODES = new Set(Object.values(SHADER_ALPHA_CODES));
-  const BORDER_SHADER_ALPHA_CODES = new Set([
-    SHADER_ALPHA_CODES.EMPTY_CELL,
-    SHADER_ALPHA_CODES.RAINBOW,
-    SHADER_ALPHA_CODES.HAS_BORDER,
-  ]);
   const OVERLAY_GLOW_SCALE = 2.2;
   const MAX_GLOW_DRAWS_PER_FRAME = 128;
+  const SKIN_SAMPLE_SIZE = 24;
+  const MAX_PENDING_SKIN_SAMPLES = 64;
+  const MAX_SKIN_SAMPLES_PER_TASK = 2;
   const OVERLAY_RENDER_SCALE = 0.78;
   const OVERLAY_CLASS = 'blobio-cell-ring-overlay';
   const GAME_CANVAS_CLASSES_TO_IGNORE = new Set([
@@ -60,6 +58,18 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
   let glowColorCache = null;
   let glowColorCacheRevision = 0;
   let cellAlphaEncodingCache = null;
+  let skinSampleCanvas = null;
+  let skinSampleContext = null;
+  let skinSampleTimer = 0;
+  const skinColorEntries = new WeakMap();
+  const cellSkinEntries = new WeakMap();
+  const pendingSkinSamples = [];
+  const skinColorWeights = new Uint32Array(4096);
+  const skinColorRed = new Uint32Array(4096);
+  const skinColorGreen = new Uint32Array(4096);
+  const skinColorBlue = new Uint32Array(4096);
+  // Native setColor packs these channels immediately and never retains the object.
+  const drawColor = { d: 1, c: 1, b: 1, a: 1 };
   const overlay = {
     targetCanvas: null,
     cssWidth: 0,
@@ -126,6 +136,12 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       legacySkinUvPassThroughs: 0,
       colorDecisionSamples: 0,
       lastColorDecision: null,
+      skinSamplesQueued: 0,
+      skinSamplesCompleted: 0,
+      skinSamplesFailed: 0,
+      skinSampleCacheHits: 0,
+      skinSampleQueueDrops: 0,
+      syncedBorderColors: 0,
     },
     overlay: {
       frames: 0,
@@ -164,7 +180,8 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     win.__BlobioCellRingSkinTexture = passThroughLegacySkinTexture;
     win.__BlobioCellRingSkinUv = passThroughLegacySkinUv;
     win.__BlobioCellRingUseBorderlessTexture = shouldUseBorderlessTexture();
-    win.__BlobioCellRingColorAllPlayers = shouldUseBorderlessTexture();
+    win.__BlobioCellRingUseOwnBorderlessTexture = Boolean(settings.enabled && settings.removeOwnCellBorder);
+    win.__BlobioCellRingColorAllPlayers = shouldColorAllPlayers();
     win.__BlobioCellRingBeginFrame = beginFrame;
     win.__BlobioCellRingTrack = trackCell;
     win.__blobCellRingDebug = debugReport;
@@ -188,6 +205,9 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
         encodeCellAlpha,
         getPackedAlphaByte,
         getPlayerDrawTexture,
+        processSkinColorQueue,
+        sampleSkinColor,
+        getDecodedSkinImage,
       };
     }
   }
@@ -202,7 +222,8 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     glowColorCache = null;
     cellAlphaEncodingCache = null;
     win.__BlobioCellRingUseBorderlessTexture = shouldUseBorderlessTexture();
-    win.__BlobioCellRingColorAllPlayers = shouldUseBorderlessTexture();
+    win.__BlobioCellRingUseOwnBorderlessTexture = Boolean(settings.enabled && settings.removeOwnCellBorder);
+    win.__BlobioCellRingColorAllPlayers = shouldColorAllPlayers();
     return settings;
   }
 
@@ -236,8 +257,9 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     const size = Number(value.glowSize);
     const borderWidth = Number(value.borderWidth);
     const mode = String(value.mode ?? value.sideGlowMode ?? 'sync').toLowerCase() === 'solid' ? 'solid' : 'sync';
+    const outlineColor = mode === 'solid' && value.outlineColor ? normalizeHexColor(value.outlineColor, null) : null;
     return {
-      enabled: value.enabled === undefined ? true : Boolean(value.enabled),
+      enabled: value.enabled === undefined ? false : Boolean(value.enabled),
       mode,
       solidColor: color,
       alpha: normalizeAlpha(value.alpha ?? value.sideGlowAlpha, 0.72),
@@ -245,10 +267,18 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
         ? 1 : Math.max(0.25, Math.min(3, Math.round(size * 100) / 100)),
       borderWidth: value.borderWidth === null || value.borderWidth === undefined || value.borderWidth === '' || !Number.isFinite(borderWidth)
         ? 1 : Math.max(0, Math.min(6, Math.round(borderWidth * 4) / 4)),
+      outlineColor,
+      outlineAlpha: value.outlineAlpha === null || value.outlineAlpha === undefined || value.outlineAlpha === ''
+        ? null : normalizeAlpha(value.outlineAlpha, null),
+      outlineRed: outlineColor ? parseInt(outlineColor.slice(1, 3), 16) : 0,
+      outlineGreen: outlineColor ? parseInt(outlineColor.slice(3, 5), 16) : 0,
+      outlineBlue: outlineColor ? parseInt(outlineColor.slice(5, 7), 16) : 0,
       transparentCell: Boolean(value.transparentCell),
       cellAlpha: normalizeAlpha(value.cellAlpha, 0.75),
       nameStyle: normalizeNameStyle(value.nameStyle),
+      removeOwnCellBorder: Boolean(value.removeOwnCellBorder),
       removeAllCellBorders: Boolean(value.removeAllCellBorders ?? value.disabledCellRings),
+      cellBorderSync: Boolean(value.cellBorderSync),
       syncColor: mode === 'sync',
       red: parseInt(color.slice(1, 3), 16),
       green: parseInt(color.slice(3, 5), 16),
@@ -278,6 +308,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
   function isRuntimeActive() {
     return Boolean(settings.enabled && (
       shouldMarkOwnCells()
+      || settings.removeOwnCellBorder
       || settings.removeAllCellBorders
     ));
   }
@@ -307,24 +338,35 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
 
     const featureEnabled = settings.enabled;
     const applyTransparency = ownCell && featureEnabled && settings.transparentCell;
-    const removeBorders = featureEnabled && settings.removeAllCellBorders;
-    if (!applyTransparency && !removeBorders) {
-      return color;
-    }
-
+    const removeBorders = featureEnabled && (settings.removeAllCellBorders || (ownCell && settings.removeOwnCellBorder));
     const nativeAlphaByte = getPackedAlphaByte(color.a);
-    const suppressBorder = removeBorders
-      && BORDER_SHADER_ALPHA_CODES.has(nativeAlphaByte);
-    if (!applyTransparency && !suppressBorder) {
-      return color;
-    }
-
     const skin = skinDraw === undefined
       ? Boolean(!cell?.t && cell?.P)
       : skinDraw === true;
+    const syncedColor = settings.cellBorderSync
+      && skin
+      && !applyTransparency
+      && !removeBorders
+      && nativeAlphaByte === SHADER_ALPHA_CODES.HAS_BORDER
+      ? getResolvedSkinColor(cell)
+      : null;
+    if (!applyTransparency && !removeBorders && !syncedColor) {
+      return color;
+    }
+
+    const suppressBorder = removeBorders
+      && (nativeAlphaByte === SHADER_ALPHA_CODES.EMPTY_CELL
+        || nativeAlphaByte === SHADER_ALPHA_CODES.RAINBOW
+        || nativeAlphaByte === SHADER_ALPHA_CODES.HAS_BORDER);
+    if (!applyTransparency && !suppressBorder && !syncedColor) {
+      return color;
+    }
+
     if (skin) {
       state.markers.skinColorMarks += 1;
-      state.markers.skinNeutralizations += 1;
+      if (!syncedColor) {
+        state.markers.skinNeutralizations += 1;
+      }
     } else {
       state.markers.normalColorMarks += 1;
     }
@@ -352,6 +394,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
         cellId: String(cell?.b ?? cell?.a ?? cell?.id ?? ''),
         ownCell,
         skinDraw: skin,
+        borderColorSynced: Boolean(syncedColor),
         transparencyApplied: applyTransparency,
         borderSuppressed: suppressBorder,
         requestedAlpha: roundDebugNumber(alpha?.requested ?? 1),
@@ -365,17 +408,21 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       };
     }
 
-    return {
-      d: skin ? 1 : color.d,
-      c: skin ? 1 : color.c,
-      b: skin ? 1 : color.b,
-      a: alpha?.value ?? 1,
-    };
+    drawColor.d = syncedColor?.r ?? (skin ? 1 : color.d);
+    drawColor.c = syncedColor?.g ?? (skin ? 1 : color.c);
+    drawColor.b = syncedColor?.b ?? (skin ? 1 : color.b);
+    drawColor.a = alpha?.value ?? (suppressBorder ? 1 : color.a);
+    if (syncedColor) {
+      state.markers.syncedBorderColors += 1;
+    }
+    return drawColor;
   }
 
   function getPackedAlphaByte(value) {
-    const alpha = Math.max(0, Math.min(1, Number(value) || 0));
-    return Math.floor(alpha * 255) & 0xfe;
+    const alpha = Number(value) || 0;
+    if (alpha >= 1) return 254;
+    if (alpha <= 0) return 0;
+    return (alpha * 255) & 0xfe;
   }
 
   function encodeCellAlpha(value) {
@@ -440,8 +487,16 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     return Boolean(settings.enabled && settings.removeAllCellBorders);
   }
 
+  function shouldColorAllPlayers() {
+    return shouldUseBorderlessTexture() || settings.cellBorderSync;
+  }
+
   function getPlayerDrawTexture(cell, textureRegion, defaultTexture = false) {
-    if (!defaultTexture || !shouldUseBorderlessTexture() || getCellType(cell) !== 1) {
+    if (!defaultTexture && settings.cellBorderSync && isSkinBorderSyncEligible(cell)) {
+      rememberSkinTexture(cell, textureRegion);
+    }
+    if (!defaultTexture || getCellType(cell) !== 1 || !settings.enabled
+        || (!settings.removeAllCellBorders && !(settings.removeOwnCellBorder && cell.p))) {
       return textureRegion;
     }
 
@@ -458,6 +513,302 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       state.markers.foreignDefaultTextureSubstitutions += 1;
     }
     return borderlessTexture;
+  }
+
+  function rememberSkinTexture(cell, textureRegion) {
+    if (!cell || !textureRegion || !isSkinBorderSyncEligible(cell)) {
+      return;
+    }
+
+    let entry = skinColorEntries.get(textureRegion);
+    if (entry) {
+      state.markers.skinSampleCacheHits += 1;
+      cellSkinEntries.set(cell, entry);
+      if (entry.status === 'deferred' && isImageReady(entry.image)) {
+        queueSkinColorSample(entry);
+      }
+      return;
+    }
+
+    entry = {
+      textureRegion,
+      image: getDecodedSkinImage(textureRegion),
+      color: null,
+      status: 'loading',
+    };
+    skinColorEntries.set(textureRegion, entry);
+    cellSkinEntries.set(cell, entry);
+
+    if (!entry.image) {
+      failSkinColorSample(entry);
+      return;
+    }
+    if (isImageReady(entry.image)) {
+      queueSkinColorSample(entry);
+      return;
+    }
+    if (typeof entry.image.addEventListener !== 'function') {
+      failSkinColorSample(entry);
+      return;
+    }
+
+    entry.image.addEventListener('load', () => queueSkinColorSample(entry), { once: true });
+    entry.image.addEventListener('error', () => failSkinColorSample(entry), { once: true });
+  }
+
+  function getDecodedSkinImage(textureRegion) {
+    const textureData = textureRegion?.v?.a;
+    const directImage = textureData?.a;
+    if (isDecodedImage(directImage)) {
+      return directImage;
+    }
+
+    const fileHandle = textureData?.a;
+    const path = fileHandle?.a;
+    const preloadedImages = fileHandle?.b?.e;
+    const keys = preloadedImages?.o;
+    const values = preloadedImages?.B;
+    if (typeof path !== 'string' || typeof keys?.length !== 'number' || typeof values?.length !== 'number') {
+      return null;
+    }
+
+    for (let index = 0; index < keys.length; index += 1) {
+      if (keys[index] === path && isDecodedImage(values[index])) {
+        return values[index];
+      }
+    }
+    return null;
+  }
+
+  function isDecodedImage(value) {
+    return Boolean(value && typeof value === 'object' && (
+      'complete' in value
+      || typeof value.decode === 'function'
+      || typeof value.addEventListener === 'function' && ('naturalWidth' in value || 'width' in value)
+    ));
+  }
+
+  function isImageReady(image) {
+    return image?.complete !== false
+      && Number(image?.naturalWidth || image?.width) > 0
+      && Number(image?.naturalHeight || image?.height) > 0;
+  }
+
+  function queueSkinColorSample(entry) {
+    if (!entry || entry.status === 'queued' || entry.status === 'resolved' || entry.status === 'failed') {
+      return;
+    }
+    if (pendingSkinSamples.length >= MAX_PENDING_SKIN_SAMPLES) {
+      state.markers.skinSampleQueueDrops += 1;
+      entry.status = 'deferred';
+      return;
+    }
+
+    entry.status = 'queued';
+    pendingSkinSamples.push(entry);
+    state.markers.skinSamplesQueued += 1;
+    scheduleSkinColorSamples();
+  }
+
+  function scheduleSkinColorSamples() {
+    if (skinSampleTimer || pendingSkinSamples.length === 0) {
+      return;
+    }
+
+    if (typeof win.requestIdleCallback === 'function') {
+      skinSampleTimer = win.requestIdleCallback(processSkinColorQueue, { timeout: 250 });
+    } else {
+      const schedule = win.setTimeout || globalThis.setTimeout;
+      skinSampleTimer = schedule(() => processSkinColorQueue(), 0);
+    }
+  }
+
+  function processSkinColorQueue(deadline, drain = false) {
+    skinSampleTimer = 0;
+    let processed = 0;
+    while (pendingSkinSamples.length > 0
+        && (drain || processed < MAX_SKIN_SAMPLES_PER_TASK)
+        && (drain
+          || (deadline?.didTimeout && processed === 0)
+          || !deadline?.timeRemaining
+          || deadline.timeRemaining() > 1)) {
+      const entry = pendingSkinSamples.shift();
+      try {
+        entry.color = sampleSkinColor(entry.image, entry.textureRegion);
+        if (!entry.color) {
+          failSkinColorSample(entry);
+        } else {
+          entry.status = 'resolved';
+          state.markers.skinSamplesCompleted += 1;
+        }
+      } catch {
+        failSkinColorSample(entry);
+      }
+      processed += 1;
+    }
+
+    if (pendingSkinSamples.length > 0) {
+      scheduleSkinColorSamples();
+    }
+    return processed;
+  }
+
+  function failSkinColorSample(entry) {
+    if (!entry || entry.status === 'failed') {
+      return;
+    }
+    entry.status = 'failed';
+    entry.color = null;
+    state.markers.skinSamplesFailed += 1;
+  }
+
+  function getResolvedSkinColor(cell) {
+    const entry = cellSkinEntries.get(cell);
+    if (!entry || entry.textureRegion !== cell?.P || entry.status !== 'resolved') {
+      return null;
+    }
+    return entry.color;
+  }
+
+  function isSkinBorderSyncEligible(cell) {
+    return getCellType(cell) === 1
+      && getPackedAlphaByte(cell?.K?.a) === SHADER_ALPHA_CODES.HAS_BORDER;
+  }
+
+  function sampleSkinColor(image, textureRegion) {
+    const context = getSkinSampleContext();
+    if (!context) {
+      return null;
+    }
+
+    const imageWidth = Number(image?.naturalWidth || image?.width);
+    const imageHeight = Number(image?.naturalHeight || image?.height);
+    const left = normalizeTextureCoordinate(textureRegion?.w, 0);
+    const right = normalizeTextureCoordinate(textureRegion?.A, 1);
+    const top = normalizeTextureCoordinate(textureRegion?.C, 0);
+    const bottom = normalizeTextureCoordinate(textureRegion?.B, 1);
+    const sourceX = Math.min(left, right) * imageWidth;
+    const sourceY = Math.min(top, bottom) * imageHeight;
+    const sourceWidth = Math.max(1, Math.abs(right - left) * imageWidth);
+    const sourceHeight = Math.max(1, Math.abs(bottom - top) * imageHeight);
+
+    context.clearRect(0, 0, SKIN_SAMPLE_SIZE, SKIN_SAMPLE_SIZE);
+    context.drawImage(
+      image,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      SKIN_SAMPLE_SIZE,
+      SKIN_SAMPLE_SIZE,
+    );
+    const pixels = context.getImageData(0, 0, SKIN_SAMPLE_SIZE, SKIN_SAMPLE_SIZE).data;
+    skinColorWeights.fill(0);
+    skinColorRed.fill(0);
+    skinColorGreen.fill(0);
+    skinColorBlue.fill(0);
+
+    let opaqueWeight = 0;
+    let chromaticWeight = 0;
+    const center = SKIN_SAMPLE_SIZE / 2;
+    const radiusSquared = (SKIN_SAMPLE_SIZE * 0.488) ** 2;
+    for (let y = 0; y < SKIN_SAMPLE_SIZE; y += 1) {
+      const dy = y + 0.5 - center;
+      for (let x = 0; x < SKIN_SAMPLE_SIZE; x += 1) {
+        const dx = x + 0.5 - center;
+        if (dx * dx + dy * dy > radiusSquared) {
+          continue;
+        }
+
+        const offset = (y * SKIN_SAMPLE_SIZE + x) * 4;
+        const alpha = pixels[offset + 3];
+        if (alpha < 32) {
+          continue;
+        }
+        const red = pixels[offset];
+        const green = pixels[offset + 1];
+        const blue = pixels[offset + 2];
+        const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
+        const bucket = (red >> 4) << 8 | (green >> 4) << 4 | (blue >> 4);
+        skinColorWeights[bucket] += alpha;
+        skinColorRed[bucket] += red * alpha;
+        skinColorGreen[bucket] += green * alpha;
+        skinColorBlue[bucket] += blue * alpha;
+        opaqueWeight += alpha;
+        if (saturation >= 36 && Math.max(red, green, blue) >= 48) {
+          chromaticWeight += alpha;
+        }
+      }
+    }
+
+    if (opaqueWeight === 0) {
+      return null;
+    }
+
+    const preferChromatic = chromaticWeight >= opaqueWeight * 0.08;
+    let bestBucket = -1;
+    let bestScore = -1;
+    for (let bucket = 0; bucket < skinColorWeights.length; bucket += 1) {
+      const weight = skinColorWeights[bucket];
+      if (weight === 0) {
+        continue;
+      }
+      const red = skinColorRed[bucket] / weight;
+      const green = skinColorGreen[bucket] / weight;
+      const blue = skinColorBlue[bucket] / weight;
+      const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
+      const chromatic = saturation >= 36 && Math.max(red, green, blue) >= 48;
+      if (preferChromatic !== chromatic) {
+        continue;
+      }
+      const score = weight * (256 + (preferChromatic ? saturation : 0));
+      if (score > bestScore) {
+        bestScore = score;
+        bestBucket = bucket;
+      }
+    }
+
+    if (bestBucket < 0) {
+      return null;
+    }
+    const weight = skinColorWeights[bestBucket];
+    let red = Math.round(skinColorRed[bestBucket] / weight);
+    const green = Math.round(skinColorGreen[bestBucket] / weight);
+    const blue = Math.round(skinColorBlue[bestBucket] / weight);
+    if (red > 249 && green < 26 && blue < 26) {
+      red = 249;
+    }
+    return {
+      r: red / 255,
+      g: green / 255,
+      b: blue / 255,
+      red,
+      green,
+      blue,
+    };
+  }
+
+  function normalizeTextureCoordinate(value, fallback) {
+    const coordinate = Number(value);
+    return Number.isFinite(coordinate) ? Math.max(0, Math.min(1, coordinate)) : fallback;
+  }
+
+  function getSkinSampleContext() {
+    if (skinSampleContext) {
+      return skinSampleContext;
+    }
+    skinSampleCanvas = typeof win.OffscreenCanvas === 'function'
+      ? new win.OffscreenCanvas(SKIN_SAMPLE_SIZE, SKIN_SAMPLE_SIZE)
+      : win.document?.createElement?.('canvas');
+    if (!skinSampleCanvas) {
+      return null;
+    }
+    skinSampleCanvas.width = SKIN_SAMPLE_SIZE;
+    skinSampleCanvas.height = SKIN_SAMPLE_SIZE;
+    skinSampleContext = skinSampleCanvas.getContext?.('2d', { willReadFrequently: true }) || null;
+    return skinSampleContext;
   }
 
   function passThroughLegacySkinTexture(_cell, textureRegion) {
@@ -486,48 +837,55 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       .replace(assignment, assignment + '\n' + [
         '    v_blobioGlowRadius = 0.0;',
         '    v_blobioBorderWidth = 0.0;',
-        '    if (a_texCoord0.y >= -3.1 && a_texCoord0.y <= -2.0',
+        '    if (a_texCoord0.y >= -3.6 && a_texCoord0.y <= -2.0',
         '        && ((a_texCoord0.x > -3.0 && a_texCoord0.x < -2.0)',
         '            || (a_texCoord0.x > 3.0 && a_texCoord0.x < 4.0))) {',
         '        v_blobioGlowRadius = a_texCoord0.x < 0.0 ? -a_texCoord0.x - 2.0 : a_texCoord0.x - 3.0;',
-        '        v_blobioBorderWidth = -a_texCoord0.y - (a_texCoord0.y > -2.5 ? 2.0 : 3.0);',
-        '        v_texCoords = vec2(a_texCoord0.x < 0.0 ? 0.0 : 1.0, a_texCoord0.y > -2.5 ? 0.0 : 1.0);',
+        '        v_blobioBorderWidth = -a_texCoord0.y - (a_texCoord0.y > -3.0 ? 2.0 : 3.0);',
+        '        v_texCoords = vec2(a_texCoord0.x < 0.0 ? 0.0 : 1.0, a_texCoord0.y > -3.0 ? 0.0 : 1.0);',
         '    }',
       ].join('\n'));
     state.shader.glowVertexPatched = true;
     return patched;
   }
 
-  function patchFragmentShaderSource(source) {
-    let original = String(source || '');
-    if (state.shader.glowVertexPatched && !original.includes('v_blobioGlowRadius')
-        && /void main\s*\(\s*\)\s*\{/.test(original)) {
-      original = original.replace(/void main\s*\(\s*\)\s*\{/, [
-        'varying mediump float v_blobioGlowRadius;',
-        'varying mediump float v_blobioBorderWidth;',
-        'void main() {',
-        '    if (v_blobioGlowRadius > 0.0) {',
-        '        float d = length(v_texCoords * 2.0 - 1.0);',
-        '        float r = v_blobioGlowRadius;',
-        '        float width = r * v_blobioBorderWidth;',
-        '        if (d >= 1.0 || d <= r - width) { discard; }',
-        '        float core = width > 0.0 ? smoothstep(r - width, r - width + min(r * 0.005, width * 0.33), d)',
-        '            * (1.0 - smoothstep(r * 0.998, r * 1.003, d)) : 0.0;',
-        // Approximate the preview's 12/30/58px box shadows around its 132px circle.
-        // The quad includes the faint tail; its boundary is not the halo's falloff curve.
-        '        float outside = max(0.0, d - r) / (1.0 - r);',
-        '        vec3 distance = outside / vec3(0.07576, 0.18939, 0.36616);',
-        '        vec3 shadows = vec3(0.375, 0.26, 0.17)',
-        '            * exp2(-1.151 * distance - 0.505 * distance * distance);',
-        '        float halo = (1.0 - (1.0 - shadows.x) * (1.0 - shadows.y) * (1.0 - shadows.z))',
-        '            * (width > 0.0 ? smoothstep(r - width * 0.67, r, d) : 1.0)',
-        '            * (1.0 - smoothstep(0.85, 1.0, outside));',
-        '        float alpha = (core + (1.0 - core) * halo) * min(1.0, v_color.a * (255.0 / 254.0));',
-        '        gl_FragColor = vec4(v_color.rgb, alpha);',
-        '        return;',
-        '    }',
-      ].join('\n'));
+  function patchGlowFragmentShader(source) {
+    if (!state.shader.glowVertexPatched || source.includes('v_blobioGlowRadius')) {
+      return source;
     }
+    return source.replace(/void main\s*\(\s*\)\s*\{/, [
+      'varying mediump float v_blobioGlowRadius;',
+      'varying mediump float v_blobioBorderWidth;',
+      'void main() {',
+      '    if (v_blobioGlowRadius > 0.0) {',
+      '        float d = length(v_texCoords * 2.0 - 1.0);',
+      '        float r = v_blobioGlowRadius;',
+      '        float glowMode = floor(v_blobioBorderWidth * 4.0);',
+      '        float width = r * (v_blobioBorderWidth - glowMode * 0.25);',
+      '        if (d >= 1.0 || d <= r - width) { discard; }',
+      '        float core = width > 0.0 ? smoothstep(r - width, r - width + min(r * 0.005, width * 0.33), d)',
+      '            * (1.0 - smoothstep(r * 0.998, r * 1.003, d)) : 0.0;',
+      // Approximate the preview's 12/30/58px box shadows around its 132px circle.
+      // The quad includes the faint tail; its boundary is not the halo's falloff curve.
+      '        float outside = max(0.0, d - r) / (1.0 - r);',
+      '        vec3 distance = outside / vec3(0.07576, 0.18939, 0.36616);',
+      '        vec3 shadows = vec3(0.375, 0.26, 0.17)',
+      '            * exp2(-1.151 * distance - 0.505 * distance * distance);',
+      '        float halo = (1.0 - (1.0 - shadows.x) * (1.0 - shadows.y) * (1.0 - shadows.z))',
+      '            * (width > 0.0 ? smoothstep(r - width * 0.67, r, d) : 1.0)',
+      '            * (1.0 - smoothstep(0.85, 1.0, outside));',
+      '        float coverage = core + (1.0 - core) * halo;',
+      '        if (glowMode > 1.5) { coverage = core; }',
+      '        else if (glowMode > 0.5) { coverage = (1.0 - core) * halo; }',
+      '        float alpha = coverage * min(1.0, v_color.a * (255.0 / 254.0));',
+      '        gl_FragColor = vec4(v_color.rgb, alpha);',
+      '        return;',
+      '    }',
+    ].join('\n'));
+  }
+
+  function patchFragmentShaderSource(source) {
+    const original = patchGlowFragmentShader(String(source || ''));
     state.shader.glowFragmentPatched = original.includes('v_blobioGlowRadius');
     state.shader.sourceCalls += 1;
     state.shader.lastSourceLength = original.length;
@@ -537,9 +895,10 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
         ? 'no-border'
         : 'unknown';
 
-    if (!original || original.includes(SHADER_PATCH_MARKER)) {
-      state.shader.lastComparisonsPatched = original.includes(SHADER_PATCH_MARKER) ? -1 : 0;
-      state.shader.lastOpacityMultipliersPatched = original.includes(SHADER_PATCH_MARKER) ? -1 : 0;
+    const alreadyPatched = original.includes(SHADER_PATCH_MARKER);
+    if (!original || alreadyPatched) {
+      state.shader.lastComparisonsPatched = alreadyPatched ? -1 : 0;
+      state.shader.lastOpacityMultipliersPatched = alreadyPatched ? -1 : 0;
       return original;
     }
 
@@ -610,7 +969,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
   }
 
   function trackCell(cell, projectionMatrix, batch, texture, setColor, drawTexture) {
-    if (!settings.enabled || settings.alpha <= 0 || !isOwnCell(cell)) {
+    if (!settings.enabled || (settings.alpha <= 0 && (settings.borderWidth <= 0 || (settings.outlineAlpha ?? settings.alpha) <= 0)) || !isOwnCell(cell)) {
       return false;
     }
     state.overlay.trackCalls += 1;
@@ -637,20 +996,57 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     }
     const pixelRadius = Math.max(2, info.radius * overlay.dpr);
     const glowRadius = pixelRadius + Math.max(7, pixelRadius * (OVERLAY_GLOW_SCALE - 1)) * settings.glowSize;
-    if (!isNearViewport(info.x, info.y, glowRadius / overlay.dpr)) {
+    const liquidJellyEnabled = win.__blobioLiquidJellyEnabled && win.__BlobioLiquidJellyMotion;
+    if (!isNearViewport(info.x, info.y, glowRadius / overlay.dpr * (liquidJellyEnabled ? 1.16 : 1))) {
       state.overlay.skipped += 1;
       state.overlay.trackViewportSkips += 1;
       return false;
     }
     const innerRadius = Math.max(0.01, Math.min(0.98, pixelRadius / glowRadius));
     const borderWidth = settings.borderWidth / 66;
-    const worldRadius = radius * glowRadius / (info.radius * overlay.dpr);
+    let worldRadius = radius * glowRadius / (info.radius * overlay.dpr);
+    let x = cell.R;
+    let y = cell.S;
+    let leftUv = -2 - innerRadius;
+    let rightUv = 3 + innerRadius;
+    let topUv = -2 - borderWidth;
+    let bottomUv = -3 - borderWidth;
+    if (liquidJellyEnabled) {
+      const motion = win.__BlobioLiquidJellyMotion(cell);
+      // Integer fields carry deformation; fractions retain the native ring widths.
+      const descriptor = 8 + (Math.round(motion.contactX * 4096) + 64) * 128
+        + Math.round(motion.x * 1024) + 64 + innerRadius;
+      leftUv = -descriptor;
+      rightUv = descriptor;
+      topUv = -8 - (Math.round(motion.contactY * 4096) + 64) * 128
+        - Math.round(motion.y * 1024) - 64 - borderWidth;
+      bottomUv = topUv - 16384;
+      x += motion.offsetX;
+      y += motion.offsetY;
+      worldRadius *= 1.1;
+    }
     const color = getCellGlowColor(cell);
+    const outlineAlpha = settings.outlineAlpha ?? settings.alpha;
+    const customOutline = settings.outlineColor !== null || settings.outlineAlpha !== null;
+    const glowUvOffset = customOutline ? 0.25 : 0;
     const previousColor = batch.f;
     try {
-      setColor(batch, { d: color.r, c: color.g, b: color.b, a: color.a });
-      drawTexture(batch, texture, cell.R - worldRadius, cell.S - worldRadius,
-        worldRadius * 2, worldRadius * 2, -2 - innerRadius, -2 - borderWidth, 3 + innerRadius, -3 - borderWidth);
+      if (settings.alpha > 0) {
+        setColor(batch, { d: color.r, c: color.g, b: color.b, a: color.a });
+        drawTexture(batch, texture, x - worldRadius, y - worldRadius,
+          worldRadius * 2, worldRadius * 2, leftUv, topUv - glowUvOffset,
+          rightUv, bottomUv - glowUvOffset);
+      }
+      if (customOutline && settings.borderWidth > 0 && outlineAlpha > 0) {
+        setColor(batch, {
+          d: settings.outlineColor ? settings.outlineRed / 255 : color.r,
+          c: settings.outlineColor ? settings.outlineGreen / 255 : color.g,
+          b: settings.outlineColor ? settings.outlineBlue / 255 : color.b,
+          a: outlineAlpha,
+        });
+        drawTexture(batch, texture, x - worldRadius, y - worldRadius,
+          worldRadius * 2, worldRadius * 2, leftUv, topUv - 0.5, rightUv, bottomUv - 0.5);
+      }
     } finally {
       batch.f = previousColor;
     }
@@ -781,6 +1177,18 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     const fallback = getStaticGlowColor();
     if (settings.mode !== 'sync') {
       return fallback;
+    }
+
+    const skinColor = settings.cellBorderSync && isSkinBorderSyncEligible(cell)
+      ? getResolvedSkinColor(cell)
+      : null;
+    if (skinColor) {
+      return {
+        r: skinColor.r,
+        g: skinColor.g,
+        b: skinColor.b,
+        a: fallback.a,
+      };
     }
 
     const color = readGameColor(cell?.K);
@@ -1020,12 +1428,12 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       state.bundle.playerTextureDrawsPatched,
       result.playerTextureDrawsPatched,
     );
-    if (!result.changed) {
-      return chunk;
+    if (result.changed) {
+      state.bundle.patchedChunks += 1;
     }
-
-    state.bundle.patchedChunks += 1;
-    return result.code;
+    return win.__BlobioLiquidJellyPatchBundle
+      ? win.__BlobioLiquidJellyPatchBundle(result.code)
+      : result.code;
   }
 
   function patchBundle(source) {
@@ -1217,6 +1625,17 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     const playerEnd = code.indexOf('break;case 4:case 3:', playerStart);
     if (playerStart >= 0 && playerEnd > playerStart) {
       let playerCode = code.slice(playerStart, playerEnd);
+      if (!playerCode.includes('__BlobioCellRingTexture(g,h,false)')) {
+        const croppedSkinDraw = /([A-Za-z_$][\w$]*)=g\.M\/g\.O;([A-Za-z_$][\w$]*)\(a\.c,h\.v,g\.R-g\.M,g\.S-g\.M,g\.N,g\.N,1-\1,1-\1,\1,\1\)/;
+        const withCroppedTextureHook = playerCode.replace(croppedSkinDraw, (drawCall, crop, drawUv) => (
+          `${crop}=g.M/g.O;$wnd.__BlobioCellRingTexture&&$wnd.__BlobioCellRingTexture(g,h,false);`
+          + `${drawUv}(a.c,h.v,g.R-g.M,g.S-g.M,g.N,g.N,1-${crop},1-${crop},${crop},${crop})`
+        ));
+        if (withCroppedTextureHook !== playerCode) {
+          playerCode = withCroppedTextureHook;
+          drawsPatched += 1;
+        }
+      }
       if (!playerCode.includes('__BlobioCellRingTexture(g,h,h==Yxe)')) {
         const playerRegionDraw = /([A-Za-z_$][\w$]*)\(a\.c,h,g\.R-g\.M,g\.S-g\.M,g\.N,g\.N\)/;
         const withTextureHook = playerCode.replace(playerRegionDraw, (drawCall, drawRegion) => (
@@ -1314,7 +1733,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       const playerDraw = new RegExp(`([A-Za-z_$][\\w$]*)\\(a\\.c,${escapedTexture},g\\.R-g\\.M,g\\.S-g\\.M,g\\.N,g\\.N\\)`);
       const patchedPlayerCode = playerCode.replace(playerDraw, (drawCall, drawRegion) => {
         drawsPatched += 1;
-        const selectedTexture = `$wnd.__BlobioCellRingUseBorderlessTexture&&${borderlessTexture}?${borderlessTexture}:${nativeTexture}`;
+        const selectedTexture = `($wnd.__BlobioCellRingUseBorderlessTexture||g.p&&$wnd.__BlobioCellRingUseOwnBorderlessTexture)&&${borderlessTexture}?${borderlessTexture}:${nativeTexture}`;
         return `${drawRegion}(a.c,${selectedTexture},g.R-g.M,g.S-g.M,g.N,g.N)`;
       });
       code = code.slice(0, playerStart) + patchedPlayerCode + code.slice(playerEnd);
@@ -1323,7 +1742,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
     const fallbackDraw = new RegExp(`(else\\{b\\.K\\.a=0\\.75;[A-Za-z_$][\\w$]*\\(a\\.c,[^;]+\\);)([A-Za-z_$][\\w$]*)\\(a\\.c,${escapedTexture},b\\.R-b\\.M,b\\.S-b\\.M,b\\.N,b\\.N\\)`);
     code = code.replace(fallbackDraw, (drawCall, prefix, drawRegion) => {
       drawsPatched += 1;
-      const selectedTexture = `$wnd.__BlobioCellRingUseBorderlessTexture&&b.c&&b.c.M==1&&${borderlessTexture}?${borderlessTexture}:${nativeTexture}`;
+      const selectedTexture = `($wnd.__BlobioCellRingUseBorderlessTexture||b.p&&$wnd.__BlobioCellRingUseOwnBorderlessTexture)&&b.c&&b.c.M==1&&${borderlessTexture}?${borderlessTexture}:${nativeTexture}`;
       return `${prefix}${drawRegion}(a.c,${selectedTexture},b.R-b.M,b.S-b.M,b.N,b.N)`;
     });
 
@@ -1418,11 +1837,11 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
         foreignColorHookConfigured: Boolean(win.__BlobioCellRingColorAllPlayers),
         colorHookPatched: state.bundle.colorHookPatched,
         ownSkinRgbNeutralWhenTransparent: true,
-        foreignColorsChangedOnlyForBorderRemoval: true,
+        foreignColorsChangedOnlyForBorderRemoval: !settings.cellBorderSync,
         customAlphaEncodingUsed: true,
         textureUploadTrackingUsed: false,
         cellFragmentShaderPatched: hasCompleteShaderPatch(),
-        borderlessTextureActive: shouldUseBorderlessTexture(),
+        borderlessTextureActive: Boolean(settings.enabled && (settings.removeAllCellBorders || settings.removeOwnCellBorder)),
         skinIdentitySource: 'draw-texture-sentinel',
         borderRemovalMechanism: 'shader-mode-suppression-plus-opaque-borderless-texture',
         opaquePackedAlphaNormalized: hasOpaqueAlphaPatch(),
@@ -1440,6 +1859,7 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       },
       borderRemoval: {
         requested: shouldUseBorderlessTexture(),
+        ownRequested: Boolean(settings.enabled && settings.removeOwnCellBorder),
         foreignColorHookConfigured: Boolean(win.__BlobioCellRingColorAllPlayers),
         colorHookPatched: state.bundle.colorHookPatched,
         borderSuppressions: state.markers.borderSuppressions,
@@ -1500,7 +1920,9 @@ export function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalT
       transparentCell: value.transparentCell,
       cellAlpha: value.cellAlpha,
       nameStyle: value.nameStyle,
+      removeOwnCellBorder: value.removeOwnCellBorder,
       removeAllCellBorders: value.removeAllCellBorders,
+      cellBorderSync: value.cellBorderSync,
       effectiveCellAlpha: getEffectiveCellAlpha(),
     };
   }

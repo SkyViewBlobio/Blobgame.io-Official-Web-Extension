@@ -116,9 +116,8 @@ export function pageJellyShaderBootstrap(initialSettings, pageWindow = globalThi
             status.noSkinShaderPatches += 1;
           }
           markVanillaJellyDisabled();
-          return nativeShaderSource.call(this, shader, patched.source);
         }
-        return nativeShaderSource.call(this, shader, source);
+        return nativeShaderSource.call(this, shader, patched.source);
       };
 
       Ctor.prototype.__blobioJellyShaderHooked = true;
@@ -165,17 +164,19 @@ export function pageJellyShaderBootstrap(initialSettings, pageWindow = globalThi
 
     const centerPattern = /(const\s+vec2\s+CENTER_COORD\s*=\s*vec2\s*\(\s*0\.5\s*,\s*0\.5\s*\)\s*;)/;
     const scalePattern = /float\s+scale\s*=\s*v_scale\s*;\s*RADIUS\s*-=\s*scale\s*;/;
-    if (!centerPattern.test(source)) {
+    let patched = source.replace(centerPattern, (center) => `${center}\n\n${buildJellyGlsl(settings.noSkinCells)}`);
+    if (patched === source) {
       return { source, changed: false };
     }
 
-    let patched = source.replace(centerPattern, `$1\n\n${buildJellyGlsl(settings.noSkinCells)}`);
     let skinPatched = false;
     let noSkinPatched = false;
 
-    if (settings.skinCells && scalePattern.test(patched)) {
-      patched = patched.replace(scalePattern, 'float scale = blobioJellyScale(v_scale, v_texCoords);\n    RADIUS -= scale;');
-      skinPatched = true;
+    if (settings.skinCells) {
+      patched = patched.replace(scalePattern, () => {
+        skinPatched = true;
+        return 'float scale = blobioJellyScale(v_scale, v_texCoords);\n    RADIUS -= scale;';
+      });
     }
 
     if (settings.noSkinCells && patched.includes('drawEmptyCell')) {
@@ -194,15 +195,15 @@ export function pageJellyShaderBootstrap(initialSettings, pageWindow = globalThi
 
   function patchNoSkinCellShader(source) {
     const startPattern = /void\s+drawEmptyCell\s*\(\s*\)\s*\{\s*float\s+len\s*=\s*length\s*\(\s*CENTER_COORD\s*-\s*v_texCoords\s*\)\s*;/;
-    if (!startPattern.test(source)) {
+    const patched = source.replace(
+      startPattern,
+      'void drawEmptyCell() {\n\n    float emptyRadius = blobioJellyEmptyRadius(v_scale, v_texCoords);\n    float len = length(CENTER_COORD - v_texCoords);',
+    );
+    if (patched === source) {
       return source;
     }
 
-    return source
-      .replace(
-        startPattern,
-        'void drawEmptyCell() {\n\n    float emptyRadius = blobioJellyEmptyRadius(v_scale, v_texCoords);\n    float len = length(CENTER_COORD - v_texCoords);',
-      )
+    return patched
       .replace(/if\s*\(\s*len\s*<\s*0\.5\s*\)\s*\{/, 'if (len < emptyRadius) {')
       .replace(/if\s*\(\s*len\s*<\s*0\.5\s*\*\s*0\.954\s*\)\s*\{/, 'if (len < emptyRadius * 0.954) {');
   }

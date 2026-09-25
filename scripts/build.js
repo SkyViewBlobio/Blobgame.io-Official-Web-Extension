@@ -40,6 +40,12 @@ const runtimeSpecs = [
     exportName: 'pageVirusPelletColorsBootstrap',
   },
   {
+    startMarker: '  /* LIQUID_JELLY_RUNTIME_START */',
+    endMarker: '  /* LIQUID_JELLY_RUNTIME_END */',
+    file: resolve(rootDir, 'src/jelly/pageLiquidJellyBootstrap.js'),
+    exportName: 'pageLiquidJellyBootstrap',
+  },
+  {
     startMarker: '  /* JELLY_SHADER_RUNTIME_START */',
     endMarker: '  /* JELLY_SHADER_RUNTIME_END */',
     file: resolve(rootDir, 'src/jelly/pageJellyShaderBootstrap.js'),

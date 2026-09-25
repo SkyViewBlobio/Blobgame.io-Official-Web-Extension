@@ -1,3 +1,5 @@
+import { readBooleanSetting } from '../storage/readBooleanSetting.js';
+
 export const HIDE_ADMIN_MD_STORAGE_KEY = 'blobio.roles.hideAdminMd';
 export const CLAN_TEXT_STORAGE_KEYS = Object.freeze({
   enabled: 'blobio.roles.clanText.enabled',
@@ -13,20 +15,8 @@ export const DEFAULT_CLAN_TEXT_SETTINGS = Object.freeze({
   showCellTags: true,
 });
 
-function readBoolean(storage, key, fallback) {
-  try {
-    const value = storage?.getItem?.(key);
-    if (value === null || value === undefined || value === '') {
-      return fallback;
-    }
-    return value === '1' || String(value).toLowerCase() === 'true';
-  } catch {
-    return fallback;
-  }
-}
-
 export function isHideAdminMdEnabled(storage) {
-  return readBoolean(storage, HIDE_ADMIN_MD_STORAGE_KEY, true);
+  return readBooleanSetting(storage, HIDE_ADMIN_MD_STORAGE_KEY, true);
 }
 
 export function setHideAdminMdEnabled(storage, enabled) {
@@ -56,18 +46,18 @@ export function normalizeClanTextSettings(settings = {}) {
 
 export function readClanTextSettings(storage) {
   return normalizeClanTextSettings({
-    enabled: readBoolean(storage, CLAN_TEXT_STORAGE_KEYS.enabled, DEFAULT_CLAN_TEXT_SETTINGS.enabled),
-    showProfileName: readBoolean(
+    enabled: readBooleanSetting(storage, CLAN_TEXT_STORAGE_KEYS.enabled, DEFAULT_CLAN_TEXT_SETTINGS.enabled),
+    showProfileName: readBooleanSetting(
       storage,
       CLAN_TEXT_STORAGE_KEYS.showProfileName,
       DEFAULT_CLAN_TEXT_SETTINGS.showProfileName,
     ),
-    showInGameTags: readBoolean(
+    showInGameTags: readBooleanSetting(
       storage,
       CLAN_TEXT_STORAGE_KEYS.showInGameTags,
       DEFAULT_CLAN_TEXT_SETTINGS.showInGameTags,
     ),
-    showCellTags: readBoolean(
+    showCellTags: readBooleanSetting(
       storage,
       CLAN_TEXT_STORAGE_KEYS.showCellTags,
       DEFAULT_CLAN_TEXT_SETTINGS.showCellTags,

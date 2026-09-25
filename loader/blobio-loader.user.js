@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Blobio Web Script Loader
 // @namespace    https://github.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension-
-// @version      0.2.96
+// @version      0.7.5
 // @author       SkyView
 // @description  Loads the Blobio extension bundle from GitHub.
 // @match        *://blobgame.io/*
@@ -32,13 +32,21 @@
   'use strict';
 
   const LOG_PREFIX = '[Blobio]';
-  const VERSION = '0.2.96';
+  const VERSION = '0.7.5';
   const CUSTOM_CLIENT_HOST = 'custom.client.blobgame.io';
   const CAPTCHA_LOGO_HIDDEN_KEY = 'blobio.chat.hideCaptchaLogo';
   const RECAPTCHA_FRAME_HOSTS = new Set(['www.google.com', 'www.recaptcha.net']);
   const STORAGE_BRIDGE_SOURCE = 'BlobioExtensionStorageBridge';
+  const CONFIG_APPLIED_KEY = 'blobio.settings.configApplied';
   const REMOTE_TEXT_BRIDGE_KEY = '__blobioFetchRemoteText';
   const FPS_UNCAP_STORAGE_KEY = 'blobio.settings.fpsUncap';
+  const FRIEND_MINIMAP_KEYS = {
+    enabled: 'blobio.settings.friendMinimapName',
+    color: 'blobio.settings.friendMinimapName.color',
+    mode: 'blobio.settings.friendMinimapName.mode',
+    nameMode: 'blobio.settings.friendMinimapName.nameMode',
+    inGameColor: 'blobio.settings.friendMinimapName.inGameColor',
+  };
   const ANIMATION_SPEED_KEYS = {
     enabled: 'blobio.settings.animationSpeed.enabled',
     slider: 'blobio.settings.animationSpeed.slider',
@@ -49,6 +57,7 @@
     skinCells: 'blobio.settings.jellyShader.skinCells',
     noSkinCells: 'blobio.settings.jellyShader.noSkinCells',
   };
+  const LIQUID_JELLY_KEY = 'blobio.settings.liquidJelly.enabled';
   const CLAN_TEXT_KEYS = {
     enabled: 'blobio.roles.clanText.enabled',
     showProfileName: 'blobio.roles.clanText.showProfileName',
@@ -114,9 +123,12 @@
     alpha: 'blobio.settings.cellRing.alpha',
     glowSize: 'blobio.settings.cellRing.glowSize',
     borderWidth: 'blobio.settings.cellRing.borderWidth',
+    outlineColor: 'blobio.settings.cellRing.outline.color',
+    outlineAlpha: 'blobio.settings.cellRing.outline.alpha',
     transparentCell: 'blobio.settings.cellRing.transparentCell.enabled',
     cellAlpha: 'blobio.settings.cellRing.transparentCell.alpha',
     nameStyle: 'blobio.settings.cellRing.preview.nameStyle',
+    removeOwnCellBorder: 'blobio.settings.cellRing.removeOwnCellBorder',
     removeAllCellBorders: 'blobio.settings.cellRing.removeAllCellBorders',
     sideGlowMode: 'blobio.settings.cellRing.sideGlow.mode',
     sideGlowColor: 'blobio.settings.cellRing.sideGlow.color',
@@ -125,6 +137,7 @@
   };
   const CELL_RING_SNAPSHOT_KEY = 'blobio.settings.cellRing.snapshot';
   const CELL_RING_COOKIE_NAME = 'blobioCellRing';
+  const CELL_BORDER_SYNC_KEY = 'blobio.settings.cellBorderSync.enabled';
   const VIRUS_PELLET_COLOR_SNAPSHOT_KEY = 'blobio.settings.virusPelletColors.snapshot';
   const VIRUS_PELLET_COLOR_COOKIE_NAME = 'blobioVirusPelletColors';
   const CELL_MASS_SNAPSHOT_KEY = 'blobio.settings.cellMass.snapshot';
@@ -154,7 +167,7 @@
   const CELL_PAUSE_RUNTIME_KEY = '__blobioCellPauseRuntime';
   const CELL_PAUSE_STATE_KEY = '__blobioCellPauseState';
   const CELL_PAUSE_MOVEMENT_GATE_KEY = '__blobioCellPauseMovementGateInstalled';
-  const CELL_PAUSE_RUNTIME_VERSION = '0.2.89';
+  const CELL_PAUSE_RUNTIME_VERSION = '0.2.90';
 
   function isRecaptchaAnchorFrame() {
     return RECAPTCHA_FRAME_HOSTS.has(location.hostname)
@@ -286,8 +299,8 @@
     },
     githubTokenKey: "",
     bundleUrls: [
-      "https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/dist/blobio-extension.bundle.js?v=0.2.96",
-      "https://cdn.jsdelivr.net/gh/SkyViewBlobio/Blobgame.io-Official-Web-Extension@main/dist/blobio-extension.bundle.js?v=0.2.96",
+      "https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/dist/blobio-extension.bundle.js?v=0.7.5",
+      "https://cdn.jsdelivr.net/gh/SkyViewBlobio/Blobgame.io-Official-Web-Extension@main/dist/blobio-extension.bundle.js?v=0.7.5",
     ],
     roles: {
       vip: "https://raw.githubusercontent.com/SkyViewBlobio/Blobgame.io-Official-Web-Extension/main/data/roles/vip.json",
@@ -773,7 +786,19 @@
       }
     } catch {}
 
-    return getLocalValue(key);
+    if (key !== CONFIG_APPLIED_KEY && key !== 'blobio.roles.vipCache'
+      && key !== 'blobio.roles.adminCache' && key !== 'blobio.roles.clanCache') {
+      try {
+        if (GM_getValue?.(CONFIG_APPLIED_KEY, undefined) === '1') return null;
+      } catch {}
+    }
+
+    const localValue = getLocalValue(key);
+    if (localValue !== null && (String(key).startsWith('blobio.controls.')
+      || String(key).startsWith('blobio.emoteSkin.'))) {
+      setSharedValue(key, localValue);
+    }
+    return localValue;
   }
 
   function setSharedValue(key, value) {
@@ -819,6 +844,13 @@
       slider,
       speed: enabled ? slider / 10 : 1,
       mode: normalizeAnimationSpeedMode(getSharedValue(ANIMATION_SPEED_KEYS.mode)),
+    };
+  }
+
+  function readLiquidJellyRuntimeSettings() {
+    return {
+      enabled: readBooleanValue(getSharedValue(LIQUID_JELLY_KEY), false),
+      version: VERSION,
     };
   }
 
@@ -983,14 +1015,12 @@
       updatedAt: 0,
     });
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'individual-values', value: individual };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'individual-values', value: individual };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(VIRUS_MOTHER_CELL_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
@@ -1017,11 +1047,13 @@
     const rawAlpha = Number(value.alpha ?? value.sideGlowAlpha);
     const rawGlowSize = Number(value.glowSize);
     const rawBorderWidth = Number(value.borderWidth);
+    const rawOutlineColor = String(value.outlineColor || '').toLowerCase();
+    const rawOutlineAlpha = Number(value.outlineAlpha);
     const rawCellAlpha = Number(value.cellAlpha);
     const rawNameStyle = String(value.nameStyle || 'normal').toLowerCase();
     const updatedAt = Number(value.updatedAt);
     return {
-      enabled: value.enabled === undefined ? true : readBooleanValue(value.enabled),
+      enabled: value.enabled === undefined ? false : readBooleanValue(value.enabled),
       mode: rawMode === 'solid' ? 'solid' : 'sync',
       solidColor: /^#[0-9a-f]{6}$/.test(rawSolidColor) ? rawSolidColor : '#19e6ff',
       alpha: Number.isFinite(rawAlpha) ? Math.max(0, Math.min(1, rawAlpha)) : 0.72,
@@ -1029,9 +1061,13 @@
         ? 1 : Math.max(0.25, Math.min(3, Math.round(rawGlowSize * 100) / 100)),
       borderWidth: value.borderWidth === null || value.borderWidth === undefined || value.borderWidth === '' || !Number.isFinite(rawBorderWidth)
         ? 1 : Math.max(0, Math.min(6, Math.round(rawBorderWidth * 4) / 4)),
+      outlineColor: /^#[0-9a-f]{6}$/.test(rawOutlineColor) ? rawOutlineColor : null,
+      outlineAlpha: value.outlineAlpha === null || value.outlineAlpha === undefined || value.outlineAlpha === '' || !Number.isFinite(rawOutlineAlpha)
+        ? null : Math.max(0, Math.min(1, rawOutlineAlpha)),
       transparentCell: readBooleanValue(value.transparentCell),
       cellAlpha: Number.isFinite(rawCellAlpha) ? Math.max(0, Math.min(1, rawCellAlpha)) : 0.75,
       nameStyle: ['normal', 'vip', 'yt'].includes(rawNameStyle) ? rawNameStyle : 'normal',
+      removeOwnCellBorder: readBooleanValue(value.removeOwnCellBorder),
       removeAllCellBorders: readBooleanValue(value.removeAllCellBorders ?? value.disabledCellRings),
       updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0,
     };
@@ -1054,32 +1090,34 @@
     const cookieSnapshotRaw = getCookieValue(CELL_RING_COOKIE_NAME);
     const cookieSnapshot = parseCellRingSnapshot(cookieSnapshotRaw);
     const individual = normalizeCellRingSnapshot({
-      enabled: readBooleanValue(getSharedValue(CELL_RING_KEYS.enabled), true),
+      enabled: readBooleanValue(getSharedValue(CELL_RING_KEYS.enabled), false),
       mode: getSharedValue(CELL_RING_KEYS.mode) || getSharedValue(CELL_RING_KEYS.sideGlowMode),
       solidColor: getSharedValue(CELL_RING_KEYS.solidColor) || getSharedValue(CELL_RING_KEYS.sideGlowColor),
       alpha: getSharedValue(CELL_RING_KEYS.alpha) ?? getSharedValue(CELL_RING_KEYS.sideGlowAlpha),
       glowSize: getSharedValue(CELL_RING_KEYS.glowSize),
       borderWidth: getSharedValue(CELL_RING_KEYS.borderWidth),
+      outlineColor: getSharedValue(CELL_RING_KEYS.outlineColor),
+      outlineAlpha: getSharedValue(CELL_RING_KEYS.outlineAlpha),
       transparentCell: readBooleanValue(getSharedValue(CELL_RING_KEYS.transparentCell)),
       cellAlpha: getSharedValue(CELL_RING_KEYS.cellAlpha),
       nameStyle: getSharedValue(CELL_RING_KEYS.nameStyle),
+      removeOwnCellBorder: readBooleanValue(getSharedValue(CELL_RING_KEYS.removeOwnCellBorder)),
       removeAllCellBorders: readBooleanValue(getSharedValue(CELL_RING_KEYS.removeAllCellBorders) ?? getSharedValue(CELL_RING_KEYS.disabledCellRings)),
       updatedAt: 0,
     });
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'individual-values', value: individual };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'individual-values', value: individual };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(CELL_RING_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
     return {
       ...selected.value,
+      cellBorderSync: readBooleanValue(getSharedValue(CELL_BORDER_SYNC_KEY), true),
       source: selected.source,
       diagnostics: {
         sharedSnapshotPresent: Boolean(sharedSnapshot),
@@ -1170,14 +1208,12 @@
     const cookieSnapshot = parseVirusPelletColorRuntimeSnapshot(cookieSnapshotRaw);
     const fallback = normalizeVirusPelletColorRuntimeSnapshot(DEFAULT_VIRUS_PELLET_COLOR_RUNTIME_SETTINGS);
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'defaults', value: fallback };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'defaults', value: fallback };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(VIRUS_PELLET_COLOR_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
@@ -1198,10 +1234,8 @@
     compact: true,
     smartRendering: true,
     emphasizeBiggest: true,
-    mode: 'normal',
     textScale: 0.65,
-    yOffset: 10,
-    nameGap: 1.2,
+    nameGap: 0.3,
     updateDelayMs: 3000,
   };
 
@@ -1216,9 +1250,7 @@
       compact: value.compact === undefined ? DEFAULT_CELL_MASS_RUNTIME_SETTINGS.compact : readBooleanValue(value.compact),
       smartRendering: value.smartRendering === undefined ? DEFAULT_CELL_MASS_RUNTIME_SETTINGS.smartRendering : readBooleanValue(value.smartRendering),
       emphasizeBiggest: value.emphasizeBiggest === undefined ? DEFAULT_CELL_MASS_RUNTIME_SETTINGS.emphasizeBiggest : readBooleanValue(value.emphasizeBiggest),
-      mode: ['normal', 'vip', 'custom', 'dynamic'].includes(value.mode) ? value.mode : DEFAULT_CELL_MASS_RUNTIME_SETTINGS.mode,
       textScale: normalizeHudInfoRuntimeNumber(value.textScale, 0.35, 1.4, DEFAULT_CELL_MASS_RUNTIME_SETTINGS.textScale),
-      yOffset: normalizeHudInfoRuntimeNumber(value.yOffset, -120, 120, DEFAULT_CELL_MASS_RUNTIME_SETTINGS.yOffset),
       nameGap: normalizeHudInfoRuntimeNumber(value.nameGap, 0.1, 3, DEFAULT_CELL_MASS_RUNTIME_SETTINGS.nameGap),
       updateDelayMs: Math.round(normalizeHudInfoRuntimeNumber(value.updateDelayMs, 0, 10000, DEFAULT_CELL_MASS_RUNTIME_SETTINGS.updateDelayMs)),
       updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0,
@@ -1243,14 +1275,12 @@
     const cookieSnapshot = parseCellMassRuntimeSnapshot(cookieSnapshotRaw);
     const fallback = normalizeCellMassRuntimeSnapshot(DEFAULT_CELL_MASS_RUNTIME_SETTINGS);
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'defaults', value: fallback };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'defaults', value: fallback };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(CELL_MASS_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
@@ -1324,14 +1354,12 @@
     const cookieSnapshot = parseFpsSaverRuntimeSnapshot(cookieSnapshotRaw);
     const fallback = normalizeFpsSaverRuntimeSnapshot(DEFAULT_FPS_SAVER_RUNTIME_SETTINGS);
 
-    const candidates = [
-      sharedSnapshot && { source: 'gm-snapshot', value: sharedSnapshot },
-      cookieSnapshot && { source: 'domain-cookie', value: cookieSnapshot },
-    ].filter(Boolean).sort((left, right) => right.value.updatedAt - left.value.updatedAt);
-    const selected = candidates[0] || { source: 'defaults', value: fallback };
-
-    if (selected.source === 'domain-cookie'
-      && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+    let selected = { source: 'defaults', value: fallback };
+    if (sharedSnapshot) {
+      selected = { source: 'gm-snapshot', value: sharedSnapshot };
+    }
+    if (cookieSnapshot && (!sharedSnapshot || cookieSnapshot.updatedAt > sharedSnapshot.updatedAt)) {
+      selected = { source: 'domain-cookie', value: cookieSnapshot };
       setSharedValue(FPS_SAVER_SNAPSHOT_KEY, JSON.stringify(cookieSnapshot));
     }
 
@@ -1351,7 +1379,9 @@
     const value = String(key || '');
     return value.startsWith('blobio.roles.')
       || value.startsWith('blobio.settings.')
-      || value.startsWith('blobio.chat.');
+      || value.startsWith('blobio.chat.')
+      || value.startsWith('blobio.controls.')
+      || value.startsWith('blobio.emoteSkin.');
   }
 
   function installExtensionInputKeyboardIsolation() {
@@ -1591,7 +1621,8 @@
         return Boolean(state.paused);
       },
       shouldBlockEvent(event) {
-        if (!state.paused || event?.__blobioCellPauseSynthetic) {
+        if (!state.paused || event?.__blobioCellPauseSynthetic
+          || event?.target?.matches?.('input[type="range"]')) {
           return false;
         }
 
@@ -3243,10 +3274,8 @@
       preserveCameraZoom: true,
       cameraDeltaFloor: 0.003000000026077032,
       cameraSmoothingEnabled: true,
-      cameraDeltaMinSeconds: 1 / 360,
-      cameraDeltaMaxSeconds: 1 / 90,
-      cameraDeltaBlend: 0.18,
-      cameraDeltaMaxStepSeconds: 1 / 650,
+      cameraDeltaMaxSeconds: 0.05,
+      cameraResponseScale: 0.5,
       minCameraDeltaSeconds: 0.0001,
       keepVisible: true,
       log: false,
@@ -3302,7 +3331,6 @@
     let insideFrameCallback = false;
     let lastFrameTime = 0;
     let currentFrameDeltaSeconds = 1 / 240;
-    let currentCameraDeltaSeconds = 1 / 240;
     let messageChannel = null;
 
     function isActive() {
@@ -3320,27 +3348,15 @@
       lastFrameTime = frameTime;
       insideFrameCallback = true;
       state.currentFrameDeltaSeconds = currentFrameDeltaSeconds;
-      currentCameraDeltaSeconds = updateCameraDelta(currentFrameDeltaSeconds);
       return frameTime;
     }
 
     function updateCameraDelta(rawDeltaSeconds) {
-      const target = native.mathMax(
-        config.cameraDeltaMinSeconds,
-        native.mathMin(config.cameraDeltaMaxSeconds, Number(rawDeltaSeconds) || 1 / 240),
-      );
-
-      if (!config.cameraSmoothingEnabled) {
-        state.smoothedCameraDeltaSeconds = target;
-        return target;
-      }
-
-      const previous = Number(state.smoothedCameraDeltaSeconds) || target;
-      const blend = native.mathMax(0.01, native.mathMin(1, Number(config.cameraDeltaBlend) || 0.18));
-      const maxStep = native.mathMax(0.0001, Number(config.cameraDeltaMaxStepSeconds) || 1 / 650);
-      const blended = previous + (target - previous) * blend;
-      const diff = native.mathMax(-maxStep, native.mathMin(maxStep, blended - previous));
-      const next = previous + diff;
+      // Use the game's delta, not intervals between unrelated animation callbacks.
+      // A per-frame minimum or moving average accelerates the camera at high FPS.
+      const delta = native.mathMax(1e-9, native.mathMin(config.cameraDeltaMaxSeconds, rawDeltaSeconds));
+      const scale = config.cameraSmoothingEnabled ? config.cameraResponseScale : 1;
+      const next = delta * scale;
       state.smoothedCameraDeltaSeconds = next;
       return next;
     }
@@ -3363,10 +3379,10 @@
           && typeof arguments[0] === 'number'
           && typeof arguments[1] === 'number'
           && arguments[0] >= 0
-          && arguments[0] < config.cameraDeltaFloor
+          && Number.isFinite(arguments[0])
           && native.mathAbs(arguments[1] - config.cameraDeltaFloor) < 1e-12
         ) {
-          return currentCameraDeltaSeconds;
+          return updateCameraDelta(arguments[0]);
         }
 
         return originalMax.apply(win.Math, arguments);
@@ -3735,6 +3751,7 @@
       nonRotatedHighDetailDraws: 0,
       nonRotatedFallbackDraws: 0,
       rotateChecks: 0,
+      rotationCacheSize: 0,
       rotateMaskActive: settings.rotate,
       lastRotateMaskId: settings.maskId,
       glowTextureDraws: 0,
@@ -3979,7 +3996,11 @@
           hash = Math.imul(hash, 16777619);
         }
         const rotation = Math.abs(hash % 360);
+        if (rotations.size >= 4096) {
+          rotations.delete(rotations.keys().next().value);
+        }
         rotations.set(key, rotation);
+        state.rotationCacheSize = rotations.size;
         return rotation;
       };
       win.__blobVirusGlowGetDrawRotation = function getDrawRotation(id, x, y, sourceName) {
@@ -4036,6 +4057,7 @@
         glowTextureDraws: state.glowTextureDraws,
         rotationDraws: state.rotationDraws,
         rotationStateChecks: state.rotationStateChecks,
+        rotationCacheSize: state.rotationCacheSize,
         colorizerVirusCalls: state.colorizerVirusCalls,
         colorizerVirusApplied: state.colorizerVirusApplied,
         colorizerVirusMissing: state.colorizerVirusMissing,
@@ -4653,19 +4675,12 @@
         return object.K;
       }
 
-      let drawColor = target.solidColor;
-      if (target.gradient) {
-        drawColor = target.gradientScratch;
-        const amount = setGradientGwtColor(drawColor, target.gradientColor, object);
-        recordColorHit(target, object, amount);
-        if (profile) {
-          recordProfileCall(profile, target.hitKey, 'gradient', profileStart);
-        }
-      } else {
-        recordColorHit(target, object, null);
-        if (profile) {
-          recordProfileCall(profile, target.hitKey, 'solid', profileStart);
-        }
+      const gradient = target.gradient;
+      const drawColor = gradient ? target.gradientScratch : target.solidColor;
+      const amount = gradient ? setGradientGwtColor(drawColor, target.gradientColor, object) : null;
+      recordColorHit(target, object, amount);
+      if (profile) {
+        recordProfileCall(profile, target.hitKey, gradient ? 'gradient' : 'solid', profileStart);
       }
 
       return drawColor;
@@ -5132,6 +5147,383 @@
   }
   /* VIRUS_PELLET_COLOR_RUNTIME_END */
 
+  /* LIQUID_JELLY_RUNTIME_START */
+  function pageLiquidJellyBootstrap(initialSettings = {}, pageWindow = globalThis) {
+    const win = pageWindow;
+    if (win.location?.hostname !== 'custom.client.blobgame.io') {
+      return false;
+    }
+    if (win.__blobioLiquidJellyInstalled) {
+      win.__blobioLiquidJellyRefresh(initialSettings);
+      return true;
+    }
+
+    const marker = 'BLOBIO_LIQUID_JELLY_V1';
+    const motions = new WeakMap();
+    const players = [];
+    const rest = { x: 0, y: 0, contactX: 0, contactY: 0, offsetX: 0, offsetY: 0 };
+    let lastTime = -1;
+    let lastContactTime = -1;
+    const state = {
+      enabled: Boolean(initialSettings.enabled),
+      version: initialSettings.version || '',
+      bundlePatches: 0,
+      vertexPatches: 0,
+      fragmentPatches: 0,
+      hookInstalled: false,
+    };
+    win.__blobioLiquidJellyInstalled = true;
+    win.__blobioLiquidJellyStatus = state;
+    win.__blobioLiquidJellyEnabled = state.enabled;
+    win.__blobioLiquidJellyRefresh = (settings) => {
+      const enabled = Boolean(settings.enabled);
+      if (enabled !== state.enabled) lastTime = -1;
+      state.enabled = enabled;
+      win.__blobioLiquidJellyEnabled = state.enabled;
+    };
+    win.__BlobioLiquidJellyPatchBundle = patchBundle;
+    win.__BlobioLiquidJellyMotion = cellMotion;
+    win.__BlobioLiquidJellyFrame = advanceFrame;
+    win.BlobioLiquidJellyDebug = () => ({
+      ...state,
+      extraDrawCalls: 0,
+      extraTextureSamples: 0,
+      passiveAmplitude: 0.003,
+      maximumAmplitude: 0.065,
+      maximumContactCompression: 0.065,
+      reloadNeeded: state.enabled && (!state.bundlePatches || !state.fragmentPatches),
+    });
+
+    for (const Context of [win.WebGLRenderingContext, win.WebGL2RenderingContext]) {
+      if (!Context?.prototype?.shaderSource) {
+        continue;
+      }
+      const nativeShaderSource = Context.prototype.shaderSource;
+      Context.prototype.shaderSource = function liquidJellyShaderSource(shader, source) {
+        return nativeShaderSource.call(this, shader, patchShader(source));
+      };
+      state.hookInstalled = true;
+    }
+    if (win.__BLOBIO_LIQUID_JELLY_TEST__) {
+      win.__BlobioLiquidJellyTest = { patchShader, patchBundle, cellMotion, advanceFrame };
+    }
+    return true;
+
+    function cellMotion(cell) {
+      return motions.get(cell) || rest;
+    }
+
+    function advanceFrame(cells, time) {
+      if (!state.enabled) {
+        lastTime = -1;
+        players.length = 0;
+        return;
+      }
+      const elapsed = lastTime < 0 ? 0 : time - lastTime;
+      const reset = elapsed < 0 || elapsed > 0.25 || lastTime < 0;
+      const dt = reset ? 0 : elapsed;
+      let updateContacts = reset || time - lastContactTime >= 1 / 30 - 0.000001;
+      lastTime = time;
+      players.length = 0;
+      for (let i = 0; i < cells.length; i += 1) {
+        const cell = cells[i];
+        if (!cell?.c || cell.c.M !== 1 || cell.a || cell.M <= 0) continue;
+        let motion = motions.get(cell);
+        if (!motion) {
+          updateContacts = true;
+          const angle = cell.n * 2.399963;
+          motion = { cell, x: 0, y: 0, vx: 0, vy: 0,
+            axisX: Math.cos(angle), axisY: Math.sin(angle), radius: cell.w,
+            cx: cell.R, cy: cell.S, forceX: 0, forceY: 0, pressure: 0, left: 0,
+            contactX: 0, contactY: 0, contactVx: 0, contactVy: 0, offsetX: 0, offsetY: 0,
+            bornAt: reset ? -1 : time, splitAt: -1 };
+          motions.set(cell, motion);
+        }
+        if (reset) {
+          motion.x = motion.y = motion.vx = motion.vy = 0;
+          motion.radius = cell.w;
+          motion.bornAt = motion.splitAt = -1;
+          motion.contactX = motion.contactY = motion.contactVx = motion.contactVy = 0;
+        }
+        const change = motion.radius > 0 ? cell.w / motion.radius - 1 : 0;
+        if (change > 0 || change < -0.12) {
+          if (change < -0.12) {
+            motion.splitAt = time;
+            updateContacts = true;
+          }
+          const dx = cell.R - motion.cx;
+          const dy = cell.S - motion.cy;
+          const travel = dx * dx + dy * dy;
+          if (travel > cell.M * cell.M * 0.0001) {
+            motion.axisX = (dx * dx - dy * dy) / travel;
+            motion.axisY = 2 * dx * dy / travel;
+          }
+          const impulse = Math.min(0.9, Math.abs(change) * 6);
+          motion.vx += motion.axisX * impulse;
+          motion.vy += motion.axisY * impulse;
+          const speed = Math.hypot(motion.vx, motion.vy);
+          if (speed > 0.9) {
+            motion.vx *= 0.9 / speed;
+            motion.vy *= 0.9 / speed;
+          }
+        }
+        motion.radius = cell.w;
+        motion.cx = cell.R;
+        motion.cy = cell.S;
+        motion.left = cell.R - cell.M * 1.035;
+        players.push(motion);
+      }
+      if (updateContacts) updateContactForces(time);
+      const damping = Math.exp(-4 * dt);
+      const cosine = Math.cos(12.806248 * dt);
+      const sine = Math.sin(12.806248 * dt) / 12.806248;
+      const contactDecay = Math.exp(-6 * dt);
+      for (let i = 0; i < players.length; i += 1) {
+        const motion = players[i];
+        const contactErrorX = motion.contactX - motion.forceX;
+        const contactErrorY = motion.contactY - motion.forceY;
+        const contactStepX = (motion.contactVx + 6 * contactErrorX) * dt;
+        const contactStepY = (motion.contactVy + 6 * contactErrorY) * dt;
+        motion.contactX = motion.forceX + (contactErrorX + contactStepX) * contactDecay;
+        motion.contactY = motion.forceY + (contactErrorY + contactStepY) * contactDecay;
+        motion.contactVx = (motion.contactVx - 6 * contactStepX) * contactDecay;
+        motion.contactVy = (motion.contactVy - 6 * contactStepY) * contactDecay;
+        if (motion.pressure === 0 && Math.abs(motion.contactX) + Math.abs(motion.contactY) < 0.00001
+            && Math.abs(motion.contactVx) + Math.abs(motion.contactVy) < 0.0001) {
+          motion.contactX = motion.contactY = motion.contactVx = motion.contactVy = 0;
+        }
+        motion.offsetX = motion.cell.p ? -motion.contactX * motion.cell.M * 4.5 : 0;
+        motion.offsetY = motion.cell.p ? -motion.contactY * motion.cell.M * 4.5 : 0;
+        const x = motion.x;
+        const y = motion.y;
+        motion.x = damping * ((cosine + 4 * sine) * x + sine * motion.vx);
+        motion.y = damping * ((cosine + 4 * sine) * y + sine * motion.vy);
+        motion.vx = damping * ((cosine - 4 * sine) * motion.vx - 180 * sine * x);
+        motion.vy = damping * ((cosine - 4 * sine) * motion.vy - 180 * sine * y);
+        const amplitude = Math.hypot(motion.x, motion.y);
+        if (amplitude > 0.055) {
+          motion.x *= 0.055 / amplitude;
+          motion.y *= 0.055 / amplitude;
+          const outward = (motion.vx * motion.x + motion.vy * motion.y) / (0.055 * 0.055);
+          if (outward > 0) {
+            motion.vx -= motion.x * outward;
+            motion.vy -= motion.y * outward;
+          }
+        } else if (amplitude < 0.00001 && motion.vx * motion.vx + motion.vy * motion.vy < 0.00000001) {
+          motion.x = motion.y = motion.vx = motion.vy = 0;
+        }
+      }
+    }
+
+    function updateContactForces(time) {
+      lastContactTime = time;
+      for (let i = 0; i < players.length; i += 1) {
+        const motion = players[i];
+        motion.forceX = motion.forceY = motion.pressure = 0;
+      }
+      players.sort((a, b) => a.left - b.left);
+      // The neighbor limit bounds work even when hundreds of cells overlap.
+      for (let i = 0; i < players.length; i += 1) {
+        const first = players[i];
+        const a = first.cell;
+        const right = a.R + a.M * 1.035;
+        for (let j = i + 1; j < players.length && j <= i + 32; j += 1) {
+          const second = players[j];
+          if (second.left > right) break;
+          const b = second.cell;
+          const dx = b.R - a.R;
+          const dy = b.S - a.S;
+          const sum = a.M + b.M;
+          const distanceSquared = dx * dx + dy * dy;
+          if (distanceSquared >= sum * sum * 1.071225) continue;
+          if ((a.J > 0 && a.J === b.J) || (a.p && b.p)) {
+            if (first.bornAt >= 0 && time - first.bornAt < 0.15 && second.splitAt >= first.bornAt - 0.08) {
+              first.vx = second.axisX * 0.75;
+              first.vy = second.axisY * 0.75;
+              first.bornAt = -1;
+            }
+            if (second.bornAt >= 0 && time - second.bornAt < 0.15 && first.splitAt >= second.bornAt - 0.08) {
+              second.vx = first.axisX * 0.75;
+              second.vy = first.axisY * 0.75;
+              second.bornAt = -1;
+            }
+          }
+          if (distanceSquared < 1) continue;
+          const distance = Math.sqrt(distanceSquared);
+          if (distance < Math.abs(a.M - b.M)) continue;
+          const compression = Math.min(0.012, Math.max(0, sum * 1.005 - distance) / (sum * 0.5) * 0.055)
+            * Math.min(1, distance / Math.min(a.M, b.M));
+          if (compression > first.pressure) {
+            first.forceX = dx / distance * compression;
+            first.forceY = dy / distance * compression;
+            first.pressure = compression;
+          }
+          if (compression > second.pressure) {
+            second.forceX = -dx / distance * compression;
+            second.forceY = -dy / distance * compression;
+            second.pressure = compression;
+          }
+        }
+      }
+    }
+
+    function patchBundle(source) {
+      if (typeof source !== 'string' || source.includes('__blobioLiquidJellyCell')) {
+        return source;
+      }
+      const cellLoop = /if\(!a\.c\|\|!g\|\|!g\.K\|\|!g\.c\)\{continue\}(?:if\(\$wnd\.__BlobPerfSaver&&\$wnd\.__BlobPerfSaver\.skipParticleWork\(g\)\)\{continue;\})?([\w$]+)\(g\);/;
+      const beforeNames = '}}else{rse(a,g)}';
+      const regionUvs = 'l=b.w;n=b.C;m=b.A;o=b.B;';
+      const frameStart = 'function ose(a){';
+      const uvDraw = /function ([\w$]+)\(a,b,c,d,e,f,g,h,i,j\)\{var k,l,m,n,o;if\(!a\.j\)/;
+      if (!cellLoop.test(source) || !source.includes(beforeNames)
+          || !source.includes(regionUvs) || !source.includes(frameStart) || !uvDraw.test(source)) {
+        return source;
+      }
+      const patched = source
+        .replace(frameStart, frameStart + '$wnd.__BlobioLiquidJellyFrame(qxe.d.a,a.w);')
+        .replace(cellLoop, '$&a.c.__blobioLiquidJellyCell=$wnd.__blobioLiquidJellyEnabled&&g.c.M==1?g:null;')
+        .replace(beforeNames, beforeNames + 'a.c.__blobioLiquidJellyCell=null;')
+        .replace(regionUvs, regionUvs + 'if(a.__blobioLiquidJellyCell){var liquidCell=a.__blobioLiquidJellyCell;var liquid=$wnd.__BlobioLiquidJellyMotion(liquidCell);var skinScale=liquidCell.O>0?2*liquidCell.M/liquidCell.O-1:1;skinScale=Math.max(0.6,Math.min(2,skinScale+Math.max(0,skinScale-1)*2));l=8.5+(skinScale-1)*0.4+(Math.round(liquid.contactX*4096)+64)*128+Math.round(liquid.x*1024)+64;m=l+16384;n=8.5+(Math.round(liquid.contactY*4096)+64)*128+Math.round(liquid.y*1024)+64;o=n+16384;c+=liquid.offsetX-e*0.05;d+=liquid.offsetY-f*0.05;h+=liquid.offsetX+e*0.05;i+=liquid.offsetY+f*0.05;}')
+        .replace(uvDraw, (match) => match.replace('if(!a.j)',
+          'if(a.__blobioLiquidJellyCell){var liquidCell=a.__blobioLiquidJellyCell;var liquid=$wnd.__BlobioLiquidJellyMotion(liquidCell);var skinScale=liquidCell.O>0?2*liquidCell.M/liquidCell.O-1:1;skinScale=Math.max(0.6,Math.min(2,skinScale+Math.max(0,skinScale-1)*2));g=8.5+(skinScale-1)*0.4+(Math.round(liquid.contactX*4096)+64)*128+Math.round(liquid.x*1024)+64;i=g+16384;h=8.5+(Math.round(liquid.contactY*4096)+64)*128+Math.round(liquid.y*1024)+64;j=h+16384;c+=liquid.offsetX-e*0.05;d+=liquid.offsetY-f*0.05;e*=1.1;f*=1.1;}if(!a.j)'));
+      state.bundlePatches += 1;
+      return patched;
+    }
+
+    function patchShader(source) {
+      if (typeof source !== 'string' || source.includes(marker)) {
+        return source;
+      }
+      if (source.includes('attribute vec2 a_texCoord0;')
+          && source.includes('varying float v_scale;')
+          && source.includes('void main()')
+          && source.includes('gl_Position = u_projTrans * a_position;')) {
+        state.vertexPatches += 1;
+        return source.replace('void main()', [
+          `// ${marker}`,
+          'uniform mediump float u_time;',
+          'varying mediump vec4 v_blobioLiquid;',
+          'varying mediump vec3 v_blobioContact;',
+          'varying mediump float v_blobioSkinScale;',
+          'void main()',
+        ].join('\n')).replace('gl_Position = u_projTrans * a_position;', [
+          'v_blobioLiquid = vec4(0.0);',
+          'v_blobioContact = vec3(0.0);',
+          'v_blobioSkinScale = 0.0;',
+          'bool liquidCell = false;',
+          'vec2 motion = vec2(0.0);',
+          'if (a_texCoord0.x >= 8.0 && a_texCoord0.y >= 8.0) {',
+          '    float side = step(16384.0, a_texCoord0.x);',
+          '    float verticalSide = step(16384.0, a_texCoord0.y);',
+          '    highp vec2 code = floor(a_texCoord0 - 8.0 - vec2(side, verticalSide) * 16384.0);',
+          '    motion = (mod(code, 128.0) - 64.0) / 1024.0;',
+          '    v_blobioContact.xy = (floor(code / 128.0) - 64.0) / 4096.0;',
+          '    v_blobioSkinScale = clamp(1.0 + (fract(a_texCoord0.x) - 0.5) / 0.4, 0.6, 2.0);',
+          '    liquidCell = true;',
+          '    v_texCoords = (vec2(side, verticalSide) - 0.5) * 1.1 + 0.5;',
+          '}',
+          ...(source.includes('varying mediump float v_blobioGlowRadius;') ? [
+            'if (abs(a_texCoord0.x) >= 8.0 && a_texCoord0.y <= -8.0) {',
+            '    highp float glowCode = abs(a_texCoord0.x) - 8.0;',
+            '    highp float borderCode = -a_texCoord0.y - 8.0;',
+            '    float verticalSide = step(16384.0, borderCode);',
+            '    v_blobioGlowRadius = fract(glowCode);',
+            '    v_blobioBorderWidth = fract(borderCode);',
+            '    highp vec2 code = floor(vec2(glowCode, borderCode - verticalSide * 16384.0));',
+            '    motion = (mod(code, 128.0) - 64.0) / 1024.0;',
+            '    v_blobioContact.xy = (floor(code / 128.0) - 64.0) / 4096.0;',
+            '    liquidCell = true;',
+            '    vec2 corner = vec2(a_texCoord0.x < 0.0 ? 0.0 : 1.0, verticalSide);',
+            '    v_texCoords = (corner - 0.5) * 1.1 + 0.5;',
+            '}',
+          ] : []),
+          'if (liquidCell) {',
+          '    v_scale = 0.0;',
+          '    v_blobioContact.z = length(v_blobioContact.xy);',
+          '    v_blobioContact.xy /= max(v_blobioContact.z, 0.0001);',
+          '    vec3 wave = vec3(motion + vec2(1.0, 0.6) * sin(u_time * 0.55) * 0.001,',
+          '        sin(u_time * 0.61) * 0.0015 + motion.y * 0.1);',
+          '    v_blobioLiquid = vec4(wave, inversesqrt(1.0 + 0.5 * dot(wave, wave)));',
+          '}',
+          'gl_Position = u_projTrans * a_position;',
+        ].join('\n'));
+      }
+      const scale = /float\s+scale\s*=\s*([^;]+);\s*RADIUS\s*-=\s*scale\s*;/;
+      const main = /void main\s*\(\s*\)\s*\{/;
+      if (!source.includes('varying float v_scale;') || !source.includes('uniform float u_time;')
+          || !source.includes('const vec2 CENTER_COORD = vec2(0.5, 0.5);')
+          || !source.includes('texture2D(u_texture, v_texCoords)')
+          || !scale.test(source) || !main.test(source)) {
+        return source;
+      }
+      const start = source.search(main);
+      let header = source.slice(0, start);
+      let body = source.slice(start);
+      header = header.replace('uniform float u_time;', 'uniform mediump float u_time;')
+        .replace('const vec2 CENTER_COORD = vec2(0.5, 0.5);', [
+          'const vec2 CENTER_COORD = vec2(0.5, 0.5);',
+          `// ${marker}`,
+          'varying mediump vec4 v_blobioLiquid;',
+          'varying mediump vec3 v_blobioContact;',
+          'varying mediump float v_blobioSkinScale;',
+          'vec2 blobioLiquidSkinUv(vec2 uv) {',
+          '    if (v_blobioSkinScale == 0.0 || v_blobioSkinScale == 1.0) return uv;',
+          '    vec2 p = (uv - CENTER_COORD) * v_blobioSkinScale;',
+          '    p *= min(1.0, 0.49 * inversesqrt(max(dot(p, p), 0.000001)));',
+          '    return CENTER_COORD + p;',
+          '}',
+          'vec2 blobioLiquidUv(vec2 uv) {',
+          '    if (v_blobioLiquid.w == 0.0) return uv;',
+          '    vec2 p = (uv - CENTER_COORD) * 2.0;',
+          '    float radiusSquared = dot(p, p);',
+          '    vec2 direction = p * inversesqrt(max(radiusSquared, 0.0001));',
+          '    vec2 second = vec2(direction.x * direction.x - direction.y * direction.y,',
+          '        2.0 * direction.x * direction.y);',
+          '    float third = second.x * direction.x - second.y * direction.y;',
+          '    float wave = dot(second, v_blobioLiquid.xy) + third * v_blobioLiquid.z;',
+          '    if (v_blobioContact.z > 0.0001) {',
+          '        float facing = max(dot(direction, v_blobioContact.xy), 0.0);',
+          '        float envelope = facing * facing;',
+          '        float dent = envelope * envelope;',
+          '        wave += v_blobioContact.z * 1.3 * (1.8 * envelope - 5.8 * dent * dent);',
+          '    }',
+          '    wave = clamp(wave, -0.063, 0.063);',
+          '    float scale = (1.0 + wave * min(radiusSquared * 2.0, 1.0)) * v_blobioLiquid.w;',
+          '    return CENTER_COORD + (uv - CENTER_COORD) / scale;',
+          '}',
+        ].join('\n'));
+      body = body.replace('float d = length(v_texCoords * 2.0 - 1.0);', [
+        'float d = length(v_texCoords * 2.0 - 1.0);',
+        'if (v_blobioLiquid.w > 0.0) {',
+        '    vec2 cellUv = (v_texCoords - CENTER_COORD) / v_blobioGlowRadius + CENTER_COORD;',
+        '    d = length((blobioLiquidUv(cellUv) - CENTER_COORD) * 2.0) * v_blobioGlowRadius;',
+        '}',
+      ].join('\n'));
+      // Special overlays return before the skin path; names have no UV tag.
+      body = body.replace(scale, (_match, nativeScale) => [
+        'vec2 liquidUv = v_blobioLiquid.w > 0.0 ? blobioLiquidUv(v_texCoords) : v_texCoords;',
+        'vec2 skinUv = blobioLiquidSkinUv(liquidUv);',
+        `float scale = v_blobioLiquid.w > 0.0 ? 0.0 : ${nativeScale};`,
+        'RADIUS -= scale;',
+      ].join('\n'))
+        .replaceAll('texture2D(u_texture, v_texCoords)', 'texture2D(u_texture, skinUv)')
+        .replaceAll('texture2D(u_texture, relCoords)', 'texture2D(u_texture, v_blobioSkinScale > 0.0 && v_blobioSkinScale != 1.0 ? skinUv : relCoords)')
+        .replaceAll('length(CENTER_COORD - v_texCoords)', 'length(CENTER_COORD - liquidUv)')
+        .replaceAll('vec2 relCoords = v_texCoords - CENTER_COORD;', 'vec2 relCoords = liquidUv - CENTER_COORD;');
+      const emptyStart = header.indexOf('void drawEmptyCell()');
+      if (emptyStart >= 0) {
+        header = header.slice(0, emptyStart) + header.slice(emptyStart)
+          .replace('length(CENTER_COORD - v_texCoords)', 'length(CENTER_COORD - blobioLiquidUv(v_texCoords))')
+          .replace('blobioJellyEmptyRadius(v_scale, v_texCoords)',
+            '(v_blobioLiquid.w > 0.0 ? 0.5 : blobioJellyEmptyRadius(v_scale, v_texCoords))');
+      }
+      state.fragmentPatches += 1;
+      return header + body;
+    }
+  }
+  /* LIQUID_JELLY_RUNTIME_END */
+
   /* JELLY_SHADER_RUNTIME_START */
   const JELLY_SHADER_MARKER = 'BlobioJellyPhysics';
   const JELLY_SHADER_VANILLA_KEY = 'config-switch-jelly-physics';
@@ -5251,9 +5643,8 @@
               status.noSkinShaderPatches += 1;
             }
             markVanillaJellyDisabled();
-            return nativeShaderSource.call(this, shader, patched.source);
           }
-          return nativeShaderSource.call(this, shader, source);
+          return nativeShaderSource.call(this, shader, patched.source);
         };
 
         Ctor.prototype.__blobioJellyShaderHooked = true;
@@ -5300,17 +5691,19 @@
 
       const centerPattern = /(const\s+vec2\s+CENTER_COORD\s*=\s*vec2\s*\(\s*0\.5\s*,\s*0\.5\s*\)\s*;)/;
       const scalePattern = /float\s+scale\s*=\s*v_scale\s*;\s*RADIUS\s*-=\s*scale\s*;/;
-      if (!centerPattern.test(source)) {
+      let patched = source.replace(centerPattern, (center) => `${center}\n\n${buildJellyGlsl(settings.noSkinCells)}`);
+      if (patched === source) {
         return { source, changed: false };
       }
 
-      let patched = source.replace(centerPattern, `$1\n\n${buildJellyGlsl(settings.noSkinCells)}`);
       let skinPatched = false;
       let noSkinPatched = false;
 
-      if (settings.skinCells && scalePattern.test(patched)) {
-        patched = patched.replace(scalePattern, 'float scale = blobioJellyScale(v_scale, v_texCoords);\n    RADIUS -= scale;');
-        skinPatched = true;
+      if (settings.skinCells) {
+        patched = patched.replace(scalePattern, () => {
+          skinPatched = true;
+          return 'float scale = blobioJellyScale(v_scale, v_texCoords);\n    RADIUS -= scale;';
+        });
       }
 
       if (settings.noSkinCells && patched.includes('drawEmptyCell')) {
@@ -5329,15 +5722,15 @@
 
     function patchNoSkinCellShader(source) {
       const startPattern = /void\s+drawEmptyCell\s*\(\s*\)\s*\{\s*float\s+len\s*=\s*length\s*\(\s*CENTER_COORD\s*-\s*v_texCoords\s*\)\s*;/;
-      if (!startPattern.test(source)) {
+      const patched = source.replace(
+        startPattern,
+        'void drawEmptyCell() {\n\n    float emptyRadius = blobioJellyEmptyRadius(v_scale, v_texCoords);\n    float len = length(CENTER_COORD - v_texCoords);',
+      );
+      if (patched === source) {
         return source;
       }
 
-      return source
-        .replace(
-          startPattern,
-          'void drawEmptyCell() {\n\n    float emptyRadius = blobioJellyEmptyRadius(v_scale, v_texCoords);\n    float len = length(CENTER_COORD - v_texCoords);',
-        )
+      return patched
         .replace(/if\s*\(\s*len\s*<\s*0\.5\s*\)\s*\{/, 'if (len < emptyRadius) {')
         .replace(/if\s*\(\s*len\s*<\s*0\.5\s*\*\s*0\.954\s*\)\s*\{/, 'if (len < emptyRadius * 0.954) {');
     }
@@ -5396,7 +5789,7 @@
   const HUD_INFO_PING_STALE_MS = 9000;
   const HUD_INFO_MAX_SAMPLES = 240;
   const HUD_INFO_BOOSTER_GAME_STALE_MS = 1200;
-  const HUD_INFO_RUNTIME_VERSION = '0.2.89.1';
+  const HUD_INFO_RUNTIME_VERSION = '0.2.89.2';
 
   const HUD_INFO_STYLE_MODES = new Set(['solid', 'simple']);
   const HUD_INFO_DATA_MODES = new Set(['default', 'advanced', 'dev']);
@@ -5483,6 +5876,7 @@
       startedAt: Date.now(),
       patchApplied: false,
       dataUpdates: 0,
+      peakScore: 0,
       lastSampleAt: 0,
       settings: normalizeHudInfoSettings(initialSettings),
       latest: {
@@ -5554,6 +5948,7 @@
     function exposeApi() {
       win.__BlobioHudInfoUpdate = updateFromGame;
       win.__BlobioHudInfoCells = updateCellsFromGame;
+      win.__BlobioHudInfoPeakScore = 0;
       win.__BlobioHudInfoBoosters = (boosters) => updateBoostersFromSource(boosters, 'game');
       win.__BlobioHudInfoSocketOpening = noteGameSocketOpening;
       win.__BlobioHudInfoSocketCreated = noteGameSocketCreated;
@@ -5841,6 +6236,10 @@
       const now = Date.now();
       const nextScore = Math.max(0, Math.round(Number(score) || 0));
       const nextFps = Math.max(0, Math.round(Number(fps) || 0));
+      if (nextScore > state.peakScore) {
+        state.peakScore = nextScore;
+        win.__BlobioHudInfoPeakScore = nextScore;
+      }
       state.dataUpdates += 1;
       state.latest.score = nextScore;
       state.latest.fps = nextFps;
@@ -5861,6 +6260,10 @@
       const count = Math.max(0, Math.round(Number(cells) || 0));
       if (state.latest.cells === count) {
         return;
+      }
+      if (count > 0 && state.latest.cells === 0) {
+        state.peakScore = 0;
+        win.__BlobioHudInfoPeakScore = 0;
       }
       state.latest.cells = count;
       state.latest.averageScore = hudInfoAverageMass(state.latest.score, count);
@@ -6418,6 +6821,7 @@
       delete win.__blobioHudInfoRefresh;
       delete win.__BlobioHudInfoDebug;
       delete win.BlobioHudInfoDebug;
+      delete win.__BlobioHudInfoPeakScore;
     } catch {
       win.__blobioHudInfoInstalled = false;
       win.__blobioHudInfoRuntimeVersion = '';
@@ -6873,6 +7277,8 @@
       context: null,
       targetCanvas: null,
       frameSeen: false,
+      overlayFrame: -1,
+      viewport: { width: 0, height: 0 },
       patchedChunks: 0,
       seenCacheScripts: 0,
       wrappedCallback: false,
@@ -7002,7 +7408,8 @@
     function beginFrame() {
       state.counters.beginFrames += 1;
       state.frameSeen = true;
-      expireEmotes();
+      state.overlayFrame = -1;
+      if (state.ownEmote || state.emotesByName.size) expireEmotes();
       if (!state.ownEmote && state.emotesByName.size === 0 && !state.overlayDirty) {
         return;
       }
@@ -7020,6 +7427,10 @@
 
     function renderCell(cellId, rawName, centerX, centerY, cellSize, radius, isOwn, projectionMatrix) {
       state.counters.renderCalls += 1;
+      if (!state.ownEmote && state.emotesByName.size === 0) {
+        state.lastRender = null;
+        return false;
+      }
       const active = findActiveEmote(rawName, isOwn);
       if (!active || !ensureOverlay()) {
         state.lastRender = {
@@ -7145,16 +7556,7 @@
     }
 
     function getOverlayViewport() {
-      const rect = state.targetCanvas?.getBoundingClientRect?.();
-      return {
-        width: Number(rect?.width) || parseCssPixels(state.overlay?.style?.width) || Number(win.innerWidth) || 0,
-        height: Number(rect?.height) || parseCssPixels(state.overlay?.style?.height) || Number(win.innerHeight) || 0,
-      };
-    }
-
-    function parseCssPixels(value) {
-      const number = Number.parseFloat(String(value || ''));
-      return Number.isFinite(number) ? number : 0;
+      return state.viewport;
     }
 
     function findActiveEmote(rawName, isOwn) {
@@ -7201,6 +7603,11 @@
     }
 
     function ensureOverlay() {
+      // Geometry is shared by every emote in this frame; refresh it next frame.
+      if (state.overlayFrame === state.counters.beginFrames
+        && state.overlay?.parentNode && state.targetCanvas?.isConnected !== false) {
+        return true;
+      }
       const canvas = findTargetCanvas();
       if (!canvas) {
         return false;
@@ -7220,6 +7627,7 @@
       }
 
       alignOverlay(canvas);
+      state.overlayFrame = state.counters.beginFrames;
       return true;
     }
 
@@ -7253,6 +7661,8 @@
       const dpr = Math.max(1, Number(win.devicePixelRatio) || 1);
       const cssWidth = Math.max(1, Math.round(Number(rect.width) || Number(canvas.clientWidth) || 1));
       const cssHeight = Math.max(1, Math.round(Number(rect.height) || Number(canvas.clientHeight) || 1));
+      state.viewport.width = Number(rect.width) || cssWidth;
+      state.viewport.height = Number(rect.height) || cssHeight;
       const width = Math.round(cssWidth * dpr);
       const height = Math.round(cssHeight * dpr);
 
@@ -7453,7 +7863,7 @@
   /* CELL_MASS_RUNTIME_START */
   function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalThis) {
     const win = pageWindow || globalThis;
-    const SCRIPT_VERSION = '0.1.40';
+    const SCRIPT_VERSION = '0.1.44';
     const host = String(win.location?.hostname || '').toLowerCase();
     if (host && host !== 'custom.client.blobgame.io' && host !== 'blobgame.io') {
       return false;
@@ -7461,6 +7871,16 @@
 
     if (win.__blobioCellMassInstalled && !needsRuntimeUpgrade()) {
       win.__blobioCellMassRefresh?.(initialSettings);
+      if (!win.__blobioCellMassState?.friendMinimapCentered) {
+        const doc = win.document;
+        const style = doc?.createElement?.('style');
+        if (style) {
+          style.id = 'blobio-friend-minimap-center-compat';
+          style.textContent = '.blobio-friend-minimap-label{text-align:center}';
+          (doc.head || doc.documentElement)?.appendChild?.(style);
+          win.__blobioCellMassState.friendMinimapCentered = true;
+        }
+      }
       return true;
     }
 
@@ -7470,6 +7890,8 @@
     const PATCH_MARKER = 'BlobioCellMassDraw';
     const CLAN_TAG_OVERLAY_CLASS = 'blobio-cell-clan-tag-overlay';
     const CLAN_TAG_OVERLAY_STYLE_ID = 'blobio-cell-clan-tag-overlay-style';
+    const FRIEND_MINIMAP_OVERLAY_CLASS = 'blobio-friend-minimap-overlay';
+    const FRIEND_MINIMAP_STYLE_ID = 'blobio-friend-minimap-style';
     const GAME_CANVAS_CLASS = 'blobio-background-game-canvas';
     const IGNORED_CANVAS_CLASSES = new Set([
       CLAN_TAG_OVERLAY_CLASS,
@@ -7500,7 +7922,7 @@
     const MASS_DEBUG_SAMPLE_INTERVAL = 64;
     const CLAN_DEBUG_SAMPLE_INTERVAL = 64;
     const PLAYER_UID_MAP_REFRESH_MS = 1000;
-    const PLAYER_UID_MAP_MAX_ROWS = 80;
+    const PLAYER_UID_CACHE_LIMIT = 2048;
     const CONTEXT_MENU_UID_HOOK_RETRY_MS = 250;
     const CONTEXT_MENU_UID_HOOK_TIMEOUT_MS = 30000;
     const UID_LOOKUP_PACKET = 65;
@@ -7510,6 +7932,7 @@
     const UID_LOOKUP_MAX_QUEUE = 64;
     const HUD_SOCKET_HOOK_RETRY_MS = 250;
     const HUD_SOCKET_HOOK_TIMEOUT_MS = 30000;
+    const FRIEND_MINIMAP_STALE_MS = 1200;
 
     let settings = normalizeSettings(initialSettings);
     let clanTagState = createEmptyClanTagState();
@@ -7535,6 +7958,23 @@
       staleClearDeadline: 0,
       hasVisibleContent: false,
     };
+    const friendMinimap = {
+      active: false,
+      overlay: null,
+      style: null,
+      canvas: null,
+      geometry: null,
+      labels: new Map(),
+      pending: new Map(),
+      frameId: 0,
+      captureFrameId: -1,
+      flushScheduled: false,
+      staleTimer: 0,
+      lastFrameAt: 0,
+      resizeHandler: null,
+      pageHideHandler: null,
+      visibilityHandler: null,
+    };
 
     const labelCache = new Map();
     const clanCellCache = new Map();
@@ -7545,9 +7985,11 @@
     const uidResponseOrigins = [];
     const seenClanPlayerIds = new Map();
     const messageHookedSockets = new WeakSet();
+    const retiredSockets = new WeakSet();
     const state = {
       installed: true,
       version: SCRIPT_VERSION,
+      friendMinimapCentered: true,
       startedAt: Date.now(),
       settings,
       seenCacheScripts: 0,
@@ -7600,6 +8042,11 @@
         clanOverlayStaleClears: 0,
         clanOverlaySkipped: 0,
         clanOverlayCleanups: 0,
+        friendMinimapFrames: 0,
+        friendMinimapCaptures: 0,
+        friendMinimapLabels: 0,
+        friendMinimapFlushes: 0,
+        friendMinimapClears: 0,
         clanSeenDetailSamples: 0,
         clanSeenDetailSkips: 0,
         clanRecentCellDiagnosticCalls: 0,
@@ -7631,6 +8078,9 @@
     win.__blobioCellClanTagRefresh = refreshClanTagState;
     win.__blobioCellClanTagBeginFrame = safeBeginClanTagOverlayFrame;
     win.__blobioCellClanTagRender = safeRenderCellClanTagOverlay;
+    win.__blobioFriendMinimapBeginFrame = safeBeginFriendMinimapFrame;
+    win.__blobioFriendMinimapCapture = safeCaptureFriendMinimap;
+    win.__blobioFriendMinimapDestroy = destroyFriendMinimap;
     win.__blobioCellClanUidResponse = handleSocketUidResponse;
     win.__BlobioCellMassDebug = debugReport;
     win.BlobioCellMassDebug = debugReport;
@@ -7665,6 +8115,15 @@
         refreshPlayerUidMapIfNeeded,
         refreshSettings,
         renderCellClanTagOverlay,
+        rememberPlayerUid,
+        rememberActiveGameSocket,
+        playerUidState,
+        friendMinimap,
+        beginFriendMinimapFrame,
+        captureFriendMinimap,
+        flushFriendMinimap,
+        destroyFriendMinimap,
+        patchFriendMinimapHooks,
       };
     }
 
@@ -7675,6 +8134,7 @@
     adoptClanUidSocketBridge();
     installPlayerUidSocketProbe();
     installHudSocketCallbackProbeWithRetry();
+    installFriendMinimap();
     installGameScriptPatch();
     return true;
 
@@ -7734,6 +8194,12 @@
         ...(nextSettings || {}),
       });
       state.settings = settings;
+      if (!friendMinimap.active) {
+        installFriendMinimap();
+      }
+      if (!settings.friendMinimapName) {
+        clearFriendMinimapLabels();
+      }
 
       if (
         previous.compact !== settings.compact
@@ -7814,8 +8280,7 @@
       const result = {
         text,
         scale,
-        dynamic: settings.mode === 'dynamic',
-        offset: settings.yOffset,
+        dynamic: true,
         lineGap: settings.nameGap,
         maxWidth: MAX_LABEL_WIDTH,
         maxHeight: primary ? PRIMARY_MAX_LABEL_HEIGHT : MAX_LABEL_HEIGHT,
@@ -7837,6 +8302,8 @@
         || typeof win.__blobioCellClanUidResponse !== 'function'
         || typeof win.__blobioCellClanTagRefresh !== 'function'
         || typeof win.__blobioCellClanTagRender !== 'function'
+        || typeof win.__blobioFriendMinimapBeginFrame !== 'function'
+        || typeof win.__blobioFriendMinimapCapture !== 'function'
         || !win.__blobioCellMassState?.clanTags;
     }
 
@@ -7867,6 +8334,313 @@
       }
     }
 
+    function installFriendMinimap() {
+      if (friendMinimap.active) {
+        return;
+      }
+
+      friendMinimap.active = true;
+      const doc = win.document || globalThis.document;
+      friendMinimap.resizeHandler = () => {
+        friendMinimap.geometry = null;
+      };
+      friendMinimap.pageHideHandler = () => clearFriendMinimapLabels();
+      friendMinimap.visibilityHandler = () => {
+        if (doc?.hidden) {
+          clearFriendMinimapLabels();
+        }
+      };
+      win.addEventListener?.('resize', friendMinimap.resizeHandler, { passive: true });
+      win.addEventListener?.('pagehide', friendMinimap.pageHideHandler);
+      doc?.addEventListener?.('visibilitychange', friendMinimap.visibilityHandler);
+    }
+
+    function destroyFriendMinimap() {
+      const doc = win.document || globalThis.document;
+      win.removeEventListener?.('resize', friendMinimap.resizeHandler);
+      win.removeEventListener?.('pagehide', friendMinimap.pageHideHandler);
+      doc?.removeEventListener?.('visibilitychange', friendMinimap.visibilityHandler);
+      if (friendMinimap.staleTimer) {
+        win.clearTimeout?.(friendMinimap.staleTimer);
+      }
+      clearFriendMinimapLabels();
+      friendMinimap.overlay?.remove?.();
+      friendMinimap.style?.remove?.();
+      friendMinimap.active = false;
+      friendMinimap.overlay = null;
+      friendMinimap.style = null;
+      friendMinimap.canvas = null;
+      friendMinimap.geometry = null;
+      friendMinimap.pending.clear();
+      friendMinimap.flushScheduled = false;
+      friendMinimap.staleTimer = 0;
+      return true;
+    }
+
+    function safeBeginFriendMinimapFrame(minimap) {
+      try {
+        return beginFriendMinimapFrame(minimap);
+      } catch (error) {
+        rememberError(`Friend minimap begin-frame failed: ${getErrorMessage(error)}`);
+        return false;
+      }
+    }
+
+    function safeCaptureFriendMinimap(...args) {
+      try {
+        return captureFriendMinimap(...args);
+      } catch (error) {
+        rememberError(`Friend minimap capture failed: ${getErrorMessage(error)}`);
+        return false;
+      }
+    }
+
+    function beginFriendMinimapFrame(minimap) {
+      win.__blobioMinimapVisibility?.(minimap);
+      if (!friendMinimap.active || !settings.friendMinimapName) {
+        return false;
+      }
+
+      friendMinimap.frameId += 1;
+      friendMinimap.captureFrameId = -1;
+      friendMinimap.pending.clear();
+      friendMinimap.lastFrameAt = Date.now();
+      state.counters.friendMinimapFrames += 1;
+      scheduleFriendMinimapFlush(friendMinimap.frameId);
+      scheduleFriendMinimapStaleClear();
+      return true;
+    }
+
+    function captureFriendMinimap(minimap, gameState, getProfileName, isFriend, nativeFriendsEnabled, getCell, x, y, playing) {
+      if (x !== undefined) win.__blobioMinimapCapture?.(minimap, gameState, x, y, playing, nativeFriendsEnabled);
+      if (!friendMinimap.active || !settings.friendMinimapName || !nativeFriendsEnabled || !minimap?.i) {
+        return false;
+      }
+
+      const viewportWidth = Number(minimap.s?.C) || 0;
+      const viewportHeight = Number(minimap.s?.r) || 0;
+      const scale = Number(minimap.k) || 0;
+      const mapSize = Number(minimap.n) || 0;
+      const worldMinimum = Number(gameState?.t?.c);
+      if (!viewportWidth || !viewportHeight || !scale || !mapSize || !Number.isFinite(worldMinimum)) {
+        return false;
+      }
+
+      for (const dot of minimap.r?.a || []) {
+        if (!dot || !isFriend?.(gameState.f, dot.a)) {
+          continue;
+        }
+        const profileName = String(getProfileName?.(gameState.f, dot.a) || '').trim();
+        if (!profileName) {
+          continue;
+        }
+        let inGameName = '';
+        if (settings.friendMinimapNameMode === 'both') {
+          inGameName = String(getCell?.(gameState.w, dot.f) || '').trim();
+        }
+        const bracket = settings.friendMinimapMode === 'bracket';
+        friendMinimap.pending.set(String(dot.a), {
+          profileText: bracket ? `[${profileName}]` : profileName,
+          inGameText: inGameName ? (bracket ? `[${inGameName}]` : inGameName) : '',
+          profileColor: settings.friendMinimapColor,
+          inGameColor: settings.friendMinimapInGameColor,
+          x: viewportWidth - mapSize - 10 + (Number(dot.d) - worldMinimum) * scale,
+          y: viewportHeight - 10 - (-Number(dot.e) - worldMinimum) * scale,
+          radius: Math.max(0, (Number(minimap.f) || 0) * scale),
+          viewportWidth,
+          viewportHeight,
+        });
+      }
+
+      friendMinimap.captureFrameId = friendMinimap.frameId;
+      state.counters.friendMinimapCaptures += 1;
+      return true;
+    }
+
+    function scheduleFriendMinimapFlush(frameId) {
+      if (friendMinimap.flushScheduled) {
+        return;
+      }
+      friendMinimap.flushScheduled = true;
+      const flush = () => {
+        friendMinimap.flushScheduled = false;
+        flushFriendMinimap(frameId);
+      };
+      if (typeof win.queueMicrotask === 'function') {
+        win.queueMicrotask(flush);
+      } else {
+        Promise.resolve().then(flush);
+      }
+    }
+
+    function scheduleFriendMinimapStaleClear() {
+      if (friendMinimap.staleTimer || typeof win.setTimeout !== 'function') {
+        return;
+      }
+      const clearIfStale = () => {
+        friendMinimap.staleTimer = 0;
+        if (!friendMinimap.active) {
+          return;
+        }
+        const remaining = FRIEND_MINIMAP_STALE_MS - (Date.now() - friendMinimap.lastFrameAt);
+        if (remaining > 0) {
+          friendMinimap.staleTimer = win.setTimeout(clearIfStale, remaining);
+          return;
+        }
+        clearFriendMinimapLabels();
+      };
+      friendMinimap.staleTimer = win.setTimeout(clearIfStale, FRIEND_MINIMAP_STALE_MS);
+    }
+
+    function flushFriendMinimap(frameId = friendMinimap.frameId) {
+      state.counters.friendMinimapFlushes += 1;
+      if (!friendMinimap.active
+        || frameId !== friendMinimap.frameId
+        || friendMinimap.captureFrameId !== frameId
+        || !settings.friendMinimapName) {
+        clearFriendMinimapLabels();
+        return false;
+      }
+
+      const geometry = getFriendMinimapGeometry();
+      const overlay = ensureFriendMinimapOverlay(geometry);
+      if (!geometry || !overlay) {
+        clearFriendMinimapLabels();
+        return false;
+      }
+
+      const visible = new Set();
+      for (const [uid, item] of friendMinimap.pending) {
+        visible.add(uid);
+        let entry = friendMinimap.labels.get(uid);
+        if (!entry) {
+          const node = overlay.ownerDocument.createElement('span');
+          node.className = 'blobio-friend-minimap-label';
+          const profile = overlay.ownerDocument.createElement('span');
+          const inGame = overlay.ownerDocument.createElement('span');
+          node.append(profile, inGame);
+          overlay.appendChild(node);
+          entry = { node, profile, inGame, profileText: '', inGameText: '', profileColor: '', inGameColor: '', width: 0, height: 0 };
+          friendMinimap.labels.set(uid, entry);
+        }
+        if (entry.profileText !== item.profileText || entry.inGameText !== item.inGameText) {
+          entry.profile.textContent = item.profileText;
+          entry.inGame.textContent = item.inGameText;
+          entry.inGame.style.display = item.inGameText ? '' : 'none';
+          entry.profileText = item.profileText;
+          entry.inGameText = item.inGameText;
+          const bounds = entry.node.getBoundingClientRect?.();
+          entry.width = Number(bounds?.width) || Math.min(220, Math.max(item.profileText.length, item.inGameText.length) * 7);
+          entry.height = Number(bounds?.height) || (item.inGameText ? 30 : 15);
+        }
+        if (entry.profileColor !== item.profileColor) {
+          entry.profile.style.color = item.profileColor;
+          entry.profileColor = item.profileColor;
+        }
+        if (entry.inGameColor !== item.inGameColor) {
+          entry.inGame.style.color = item.inGameColor;
+          entry.inGameColor = item.inGameColor;
+        }
+
+        const scaleX = geometry.width / item.viewportWidth;
+        const scaleY = geometry.height / item.viewportHeight;
+        const screenX = geometry.left + item.x * scaleX;
+        const screenBottom = geometry.top + (item.y - item.radius) * scaleY - 3;
+        const halfWidth = Math.min(entry.width / 2, geometry.width / 2);
+        const windowWidth = Number(win.innerWidth) || geometry.left + geometry.width;
+        const windowHeight = Number(win.innerHeight) || geometry.top + geometry.height;
+        const clampedX = Math.max(halfWidth, Math.min(windowWidth - halfWidth, screenX));
+        const clampedBottom = Math.max(entry.height, Math.min(windowHeight, screenBottom));
+        entry.node.style.left = `${Math.round(clampedX - geometry.left)}px`;
+        entry.node.style.top = `${Math.round(clampedBottom - geometry.top)}px`;
+      }
+
+      for (const [uid, entry] of friendMinimap.labels) {
+        if (!visible.has(uid)) {
+          entry.node.remove?.();
+          friendMinimap.labels.delete(uid);
+        }
+      }
+      state.counters.friendMinimapLabels = friendMinimap.labels.size;
+      return true;
+    }
+
+    function getFriendMinimapGeometry() {
+      const canvas = friendMinimap.canvas?.isConnected
+        ? friendMinimap.canvas
+        : findClanTagTargetCanvas(Date.now());
+      if (!canvas) {
+        friendMinimap.canvas = null;
+        friendMinimap.geometry = null;
+        return null;
+      }
+      if (canvas !== friendMinimap.canvas) {
+        friendMinimap.canvas = canvas;
+        friendMinimap.geometry = null;
+      }
+      if (!friendMinimap.geometry) {
+        const rect = canvas.getBoundingClientRect?.();
+        const width = Number(rect?.width) || Number(canvas.clientWidth) || 0;
+        const height = Number(rect?.height) || Number(canvas.clientHeight) || 0;
+        if (!width || !height) {
+          return null;
+        }
+        friendMinimap.geometry = {
+          left: Number(rect?.left) || 0,
+          top: Number(rect?.top) || 0,
+          width,
+          height,
+        };
+      }
+      return friendMinimap.geometry;
+    }
+
+    function ensureFriendMinimapOverlay(geometry) {
+      const doc = win.document || globalThis.document;
+      if (!doc?.createElement || !geometry) {
+        return null;
+      }
+      if (!friendMinimap.style?.isConnected) {
+        const style = doc.createElement('style');
+        style.id = FRIEND_MINIMAP_STYLE_ID;
+        style.textContent = `
+  .${FRIEND_MINIMAP_OVERLAY_CLASS}{position:fixed;z-index:1;pointer-events:none;overflow:visible;contain:layout style paint}
+  .blobio-friend-minimap-label{position:absolute;display:block;max-width:220px;transform:translate(-50%,-100%);text-align:center;font:700 12px/1.2 "Blobio Flags",Ubuntu,"Segoe UI",Arial,"Segoe UI Emoji",sans-serif;text-shadow:-1px -1px 1px #000,1px -1px 1px #000,-1px 1px 1px #000,1px 1px 1px #000,0 0 4px #000}
+  .blobio-friend-minimap-label span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  `;
+        (doc.head || doc.documentElement)?.appendChild?.(style);
+        friendMinimap.style = style;
+      }
+      if (!friendMinimap.overlay?.isConnected) {
+        for (const stale of doc.querySelectorAll?.(`.${FRIEND_MINIMAP_OVERLAY_CLASS}`) || []) {
+          stale.remove?.();
+        }
+        const overlay = doc.createElement('div');
+        overlay.className = FRIEND_MINIMAP_OVERLAY_CLASS;
+        overlay.setAttribute('aria-hidden', 'true');
+        (doc.body || doc.documentElement)?.appendChild?.(overlay);
+        friendMinimap.overlay = overlay;
+      }
+      const overlay = friendMinimap.overlay;
+      overlay.style.left = `${geometry.left}px`;
+      overlay.style.top = `${geometry.top}px`;
+      overlay.style.width = `${geometry.width}px`;
+      overlay.style.height = `${geometry.height}px`;
+      return overlay;
+    }
+
+    function clearFriendMinimapLabels() {
+      if (friendMinimap.labels.size > 0) {
+        state.counters.friendMinimapClears += 1;
+      }
+      for (const entry of friendMinimap.labels.values()) {
+        entry.node.remove?.();
+      }
+      friendMinimap.labels.clear();
+      friendMinimap.pending.clear();
+      state.counters.friendMinimapLabels = 0;
+    }
+
     function drawCellClanTagLabel(
       playerId,
       cellId,
@@ -7881,13 +8655,11 @@
       loweredRankName = false,
     ) {
       state.counters.clanHookCalls += 1;
-      rememberSeenClanPlayerId(playerId, name, cellId);
-
       if (!clanTagState.settings.enabled || !clanTagState.settings.showCellTags) {
         state.counters.clanHiddenBySetting += 1;
-        rememberClanCellSample('hidden-setting', playerId, cellId, mass, renderSize, name, nameDrawn);
         return null;
       }
+      rememberSeenClanPlayerId(playerId, name, cellId);
 
       const safeMass = Math.max(0, Number(mass) || 0);
       const safeRenderSize = Number(renderSize) || Number(rawSize) || 0;
@@ -7934,7 +8706,7 @@
         priority: getClanCellMetric(safeMass, safeRenderSize),
         gap: Math.max(3, Math.min(12, safeRenderSize * 0.04)),
         maxWidth: CLAN_TAG_MAX_WIDTH,
-        position: settings.mode === 'vip' || (settings.mode === 'dynamic' && loweredRankName) ? 'below' : 'above',
+        position: loweredRankName ? 'below' : 'above',
         downwardOffsetRatio: shortName ? CLAN_TAG_SHORT_NAME_DOWNWARD_OFFSET : 0,
         bold: true,
         color: { ...CLAN_TAG_COLOR },
@@ -8666,12 +9438,7 @@
       playerUidState.refreshedAt = now;
       playerUidState.refreshes += 1;
 
-      try {
-        playerUidState.lastError = '';
-      } catch (error) {
-        playerUidState.lastError = getErrorMessage(error);
-        rememberError(`Cell clan tag player UID map failed: ${playerUidState.lastError}`);
-      }
+      playerUidState.lastError = '';
 
       state.counters.clanUidMapRefreshes += 1;
       state.playerUidMap = describePlayerUidState();
@@ -8740,7 +9507,7 @@
         rememberActiveGameSocket(this, 'socket-send');
         const result = previousSend.apply(this, arguments);
         const manualPlayerId = readUidLookupRequestPlayerId(data);
-        if (manualPlayerId) {
+        if (manualPlayerId && this === activeGameSocket) {
           rememberUidResponseOrigin('manual', manualPlayerId);
         }
         return result;
@@ -8768,7 +9535,6 @@
       try {
         const WrappedWebSocket = function BlobioTrackedWebSocket(...args) {
           const socket = new WebSocketCtor(...args);
-          rememberActiveGameSocket(socket, 'socket-constructor');
           return socket;
         };
 
@@ -8827,7 +9593,7 @@
       const previous = original.__blobioCellClanUidSocketCallbackOriginal || original;
       const wrapped = function blobioCellClanUidSocketCallback(socket, event) {
         rememberActiveGameSocket(socket, source);
-        if (source === 'hud-message' && consumeSocketUidResponseEvent(event)) {
+        if (source === 'hud-message' && consumeSocketUidResponseEvent(event, socket)) {
           return true;
         }
         return previous.apply(this, arguments);
@@ -8839,11 +9605,20 @@
     }
 
     function rememberActiveGameSocket(socket, source = 'socket-hook') {
-      if (!socket || typeof socket !== 'object') {
+      if (!socket || typeof socket !== 'object' || retiredSockets.has(socket) || socket.readyState > 1) {
         return;
       }
 
+      // Constructor-only sockets include HUD ping probes. Adopt a connection on game activity.
+      if (socket !== activeGameSocket && activeGameSocket && isSocketOpen(activeGameSocket)
+        && !source.startsWith('hud-')) {
+        return;
+      }
       const changed = activeGameSocket !== socket || !playerUidState.socketFound;
+      if (activeGameSocket !== socket) {
+        if (activeGameSocket) retiredSockets.add(activeGameSocket);
+        resetPlayerUidSession();
+      }
       activeGameSocket = socket;
       playerUidState.socketFound = true;
       playerUidState.lastSocketSource = source;
@@ -8855,6 +9630,32 @@
       flushUidLookupQueue(Date.now());
     }
 
+    function resetPlayerUidSession() {
+      playerUidState.playerIdToUid.clear();
+      playerUidState.playerIdSources.clear();
+      playerUidState.nameToUid.clear();
+      playerUidState.sources.clear();
+      playerUidState.ambiguousNames.clear();
+      playerUidState.lastContextMenu = null;
+      playerUidState.lastMatch = null;
+      queuedUidLookups.clear();
+      pendingUidLookups.clear();
+      uidLookupCooldowns.clear();
+      uidLookupQueue.length = 0;
+      uidResponseOrigins.length = 0;
+      nextUidLookupAt = 0;
+      seenClanPlayerIds.clear();
+      clanCellCache.clear();
+      clanOverlay.pending.clear();
+      clanOverlay.selectedCells.clear();
+      clearClanTagOverlayCanvas();
+      clanOverlay.hasVisibleContent = false;
+      if (clanOverlay.staleClearTimer) win.clearTimeout?.(clanOverlay.staleClearTimer);
+      clanOverlay.staleClearTimer = 0;
+      clanOverlay.staleClearDeadline = 0;
+      state.recentClanCells.length = 0;
+    }
+
     function installSocketSendUidHook(socket) {
       if (typeof socket.send !== 'function' || socket.send.__blobioClanUidSocketPatchVersion === SCRIPT_VERSION) {
         return;
@@ -8864,7 +9665,7 @@
       const wrapped = function blobioClanUidGameSocketSend(data) {
         const result = previous.apply(this, arguments);
         const playerId = readUidLookupRequestPlayerId(data);
-        if (playerId) {
+        if (playerId && socket === activeGameSocket) {
           rememberUidResponseOrigin('manual', playerId);
         }
         return result;
@@ -8988,7 +9789,9 @@
           state.counters.clanUidLookupSentBySocket += 1;
           return true;
         } catch (error) {
+          if (activeGameSocket) retiredSockets.add(activeGameSocket);
           activeGameSocket = null;
+          resetPlayerUidSession();
           playerUidState.socketFound = false;
           playerUidState.lastError = getErrorMessage(error);
           rememberError(`Cell clan tag UID lookup failed: ${playerUidState.lastError}`);
@@ -9153,6 +9956,14 @@
       if (typeof socket.addEventListener === 'function' && !messageHookedSockets.has(socket)) {
         try {
           socket.addEventListener('message', handleSocketMessageEvent, true);
+          socket.addEventListener('close', () => {
+            if (socket !== activeGameSocket) return;
+            retiredSockets.add(socket);
+            activeGameSocket = null;
+            resetPlayerUidSession();
+            playerUidState.socketFound = false;
+            state.playerUidMap = describePlayerUidState();
+          }, { once: true });
           messageHookedSockets.add(socket);
           installed = true;
         } catch (error) {
@@ -9180,7 +9991,7 @@
 
       const previous = original.__blobioCellClanUidMessageOriginal || original;
       const wrapped = function blobioCellClanUidSocketMessage(event) {
-        if (consumeSocketUidResponseEvent(event)) {
+        if (consumeSocketUidResponseEvent(event, socket)) {
           return undefined;
         }
         return previous.apply(this, arguments);
@@ -9199,12 +10010,14 @@
     }
 
     function handleSocketMessageEvent(event) {
-      consumeSocketUidResponseEvent(event);
+      consumeSocketUidResponseEvent(event, event.currentTarget);
     }
 
-    function consumeSocketUidResponseEvent(event) {
+    function consumeSocketUidResponseEvent(event, socket) {
+      if (socket !== activeGameSocket && !retiredSockets.has(socket)) return false;
       const uid = readUidLookupResponseMessage(event?.data);
-      if (!uid || !handleSocketUidResponse(uid)) {
+      // Retired replies must not reach the game's context menu and repopulate the new session.
+      if (!uid || (socket === activeGameSocket && !handleSocketUidResponse(uid))) {
         return false;
       }
 
@@ -9258,47 +10071,6 @@
     function isSocketOpen(socket) {
       const openValue = Number(win.WebSocket?.OPEN ?? 1);
       return Number(socket?.readyState) === openValue;
-    }
-
-    function collectMouseMenuUidRow(next) {
-      const doc = win.document || globalThis.document;
-      const playerName = doc?.querySelector?.('#mouseMenu #playerName[uid], #playerName[uid]');
-      const uid = normalizeUid(playerName?.getAttribute?.('uid'));
-      if (!uid) {
-        return;
-      }
-
-      rememberPlayerNameUid(next, playerName.getAttribute?.('title') || playerName.textContent, uid, 'mouse-menu-dom');
-    }
-
-    function collectLeaderboardUidRows(next) {
-      const doc = win.document || globalThis.document;
-      const rows = Array.from(doc?.querySelectorAll?.('#leader-board li[uid]') || [])
-        .slice(0, PLAYER_UID_MAP_MAX_ROWS);
-
-      for (const row of rows) {
-        const uid = normalizeUid(row.getAttribute?.('uid'));
-        if (!uid) {
-          continue;
-        }
-
-        rememberPlayerNameUid(next, stripLeaderboardRank(row.textContent), uid, 'leaderboard');
-      }
-    }
-
-    function collectChatUidRows(next) {
-      const doc = win.document || globalThis.document;
-      const rows = Array.from(doc?.querySelectorAll?.('#chat li[uid]') || [])
-        .slice(-PLAYER_UID_MAP_MAX_ROWS);
-
-      for (const row of rows) {
-        const uid = normalizeUid(row.getAttribute?.('uid'));
-        if (!uid) {
-          continue;
-        }
-
-        rememberPlayerNameUid(next, readChatPlayerName(row), uid, 'chat');
-      }
     }
 
     function installContextMenuUidHook() {
@@ -9366,6 +10138,11 @@
       if (normalizedPlayerId) {
         playerUidState.playerIdToUid.set(normalizedPlayerId, uid);
         playerUidState.playerIdSources.set(normalizedPlayerId, source);
+        if (playerUidState.playerIdToUid.size > PLAYER_UID_CACHE_LIMIT) {
+          const oldest = playerUidState.playerIdToUid.keys().next().value;
+          playerUidState.playerIdToUid.delete(oldest);
+          playerUidState.playerIdSources.delete(oldest);
+        }
       }
 
       rememberPlayerNameUid(playerUidState, playerName, uid, source);
@@ -9389,28 +10166,21 @@
       const existing = next.nameToUid.get(normalizedName);
       if (existing && existing !== uid) {
         next.nameToUid.delete(normalizedName);
+        next.sources.delete(normalizedName);
         next.ambiguousNames.add(normalizedName);
+        if (next.ambiguousNames.size > PLAYER_UID_CACHE_LIMIT) {
+          next.ambiguousNames.delete(next.ambiguousNames.values().next().value);
+        }
         return;
       }
 
       next.nameToUid.set(normalizedName, uid);
       next.sources.set(normalizedName, source);
-    }
-
-    function stripLeaderboardRank(value) {
-      return String(value || '').replace(/^\s*\d+\.\s*/, '');
-    }
-
-    function readChatPlayerName(row) {
-      const firstSpan = Array.from(row?.children || [])
-        .find((child) => String(child?.tagName || '').toUpperCase() === 'SPAN');
-      if (firstSpan) {
-        return firstSpan.textContent;
+      if (next.nameToUid.size > PLAYER_UID_CACHE_LIMIT) {
+        const oldest = next.nameToUid.keys().next().value;
+        next.nameToUid.delete(oldest);
+        next.sources.delete(oldest);
       }
-
-      const text = String(row?.textContent || '');
-      const colonIndex = text.indexOf(':');
-      return colonIndex >= 0 ? text.slice(0, colonIndex) : text;
     }
 
     function normalizePlayerName(value) {
@@ -9559,7 +10329,6 @@
         mass: Math.round(mass * 10) / 10,
         text: result.text,
         scale: roundNumber(result.scale),
-        offset: roundNumber(result.offset),
         primary: Boolean(result.primary),
         cached: Boolean(result.cached),
       };
@@ -9919,6 +10688,12 @@
         result.changed = true;
         result.reason = 'patched-unicode-names';
       }
+      const friendMinimapPatch = patchFriendMinimapHooks(result.source);
+      if (friendMinimapPatch.changed) {
+        result.source = friendMinimapPatch.source;
+        result.changed = true;
+        result.reason = 'patched-friend-minimap';
+      }
       if (typeof result.source !== 'string' || result.source.includes('__blobioCellMassMeasureName(h,')) {
         return result;
       }
@@ -9957,6 +10732,81 @@
         'f=a.o.b/(a.i.b.e/a.i.b.A);Nn(a.i.b,f);' +
         '}else{' + original + ';}')
         .replace(color, 'a.i.a.__blobioUnicodeBounds=null;' + color);
+    }
+
+    function patchFriendMinimapHooks(source) {
+      if (typeof source !== 'string') {
+        return { source, changed: false };
+      }
+
+      const beginHook = '$wnd.__blobioFriendMinimapBeginFrame&&$wnd.__blobioFriendMinimapBeginFrame(qxe.v);';
+      const captureHook = ';$wnd.__blobioFriendMinimapCapture&&$wnd.__blobioFriendMinimapCapture(a,qxe,Gye,Lye,Nye(qxe.f,(Ize(),Eze)),E2b,b,c,d);';
+      const insertions = [];
+
+      if (!source.includes(beginHook)) {
+        const renderAnchor = '!!qxe.v&&qre(qxe.v,qxe.c.b,qxe.c.c,!!c);';
+        const renderIndex = uniqueIndexOf(source, renderAnchor);
+        const renderFunction = readFunctionBounds(source, renderIndex);
+        if (!renderFunction) {
+          return { source, changed: false };
+        }
+        insertions.push({ index: renderFunction.bodyStart + 1, text: beginHook });
+      }
+
+      if (!source.includes('__blobioFriendMinimapCapture')) {
+        const friendsAnchor = 'if(Nye(qxe.f,(Ize(),Eze))){VL(a.p,a.d);for(';
+        const friendsIndex = uniqueIndexOf(source, friendsAnchor);
+        const minimapFunction = readFunctionBounds(source, friendsIndex);
+        if (!minimapFunction) {
+          return { source, changed: false };
+        }
+        insertions.push({ index: minimapFunction.end, text: captureHook });
+        const draws = [
+          'dt(a.a,a.q,Jse?0:100*a.k,a.s.r-a.n,a.n+5,a.n)',
+          'dt(a.a,a.q,a.s.C-a.n-10,10,a.n,a.n)',
+          'KL(a.p,b-(sxe(),qxe).t.c,c-qxe.t.c,a.f)',
+          'KL(a.p,f.d-qxe.t.c,-f.e-qxe.t.c,a.f)',
+        ];
+        const positions = draws.map(draw => uniqueIndexOf(source, draw));
+        if (positions.some(index => index <= minimapFunction.bodyStart || index >= minimapFunction.end)) {
+          return { source, changed: false };
+        }
+        positions.forEach((index, i) => {
+          insertions.push({ index, text: 'if(!$wnd.__blobioMinimapHudActive){' });
+          insertions.push({ index: index + draws[i].length, text: '}' });
+        });
+      }
+
+      let patched = source;
+      for (const insertion of insertions.sort((left, right) => right.index - left.index)) {
+        patched = patched.slice(0, insertion.index) + insertion.text + patched.slice(insertion.index);
+      }
+      return { source: patched, changed: patched !== source };
+    }
+
+    function uniqueIndexOf(source, value) {
+      const index = source.indexOf(value);
+      return index >= 0 && source.indexOf(value, index + value.length) < 0 ? index : -1;
+    }
+
+    function readFunctionBounds(source, anchorIndex) {
+      if (anchorIndex < 0) {
+        return null;
+      }
+      const start = source.lastIndexOf('function ', anchorIndex);
+      const bodyStart = source.indexOf('{', start);
+      if (start < 0 || bodyStart < start || bodyStart > anchorIndex) {
+        return null;
+      }
+      let depth = 0;
+      for (let index = bodyStart; index < source.length; index += 1) {
+        if (source[index] === '{') {
+          depth += 1;
+        } else if (source[index] === '}' && --depth === 0) {
+          return { start, bodyStart, end: index };
+        }
+      }
+      return null;
     }
 
     function patchLegacyGameBundle(source) {
@@ -10050,7 +10900,6 @@
         'b=g.R-a.o.d/2;',
         'c=g.S-a.o.b/2;',
         'd&&(c+=f*h.lineGap+a.o.b*0.55);',
-        'c+=h.offset;',
         'c=$wnd.Math.max(g.S-g.M,c);',
         'c=$wnd.Math.min(g.S+g.M-a.o.b,c);',
         '$wnd.__blobioCellMassCaptureDraw&&$wnd.__blobioCellMassCaptureDraw(g.n,h,a.B,b,c);',
@@ -10426,11 +11275,14 @@
         compact: true,
         smartRendering: true,
         emphasizeBiggest: true,
-        mode: 'normal',
         textScale: 0.65,
-        yOffset: 10,
-        nameGap: 1.2,
+        nameGap: 0.3,
         updateDelayMs: 3000,
+        friendMinimapName: true,
+        friendMinimapColor: '#ffffff',
+        friendMinimapMode: 'normal',
+        friendMinimapNameMode: 'both',
+        friendMinimapInGameColor: '#ffffff',
       };
 
       return {
@@ -10438,11 +11290,20 @@
         compact: source.compact === undefined ? defaults.compact : Boolean(source.compact),
         smartRendering: source.smartRendering === undefined ? defaults.smartRendering : Boolean(source.smartRendering),
         emphasizeBiggest: source.emphasizeBiggest === undefined ? defaults.emphasizeBiggest : Boolean(source.emphasizeBiggest),
-        mode: ['normal', 'vip', 'custom', 'dynamic'].includes(source.mode) ? source.mode : defaults.mode,
         textScale: clampNumber(source.textScale, 0.35, 1.4, defaults.textScale),
-        yOffset: clampNumber(source.yOffset, -120, 120, defaults.yOffset),
         nameGap: clampNumber(source.nameGap, 0.1, 3, defaults.nameGap),
         updateDelayMs: Math.round(clampNumber(source.updateDelayMs, 0, 10000, defaults.updateDelayMs)),
+        friendMinimapName: source.friendMinimapName === undefined
+          ? defaults.friendMinimapName
+          : Boolean(source.friendMinimapName),
+        friendMinimapColor: /^#[0-9a-f]{6}$/i.test(source.friendMinimapColor || '')
+          ? source.friendMinimapColor.toLowerCase()
+          : defaults.friendMinimapColor,
+        friendMinimapMode: source.friendMinimapMode === 'bracket' ? 'bracket' : defaults.friendMinimapMode,
+        friendMinimapNameMode: source.friendMinimapNameMode === 'onlyProfile' ? 'onlyProfile' : defaults.friendMinimapNameMode,
+        friendMinimapInGameColor: /^#[0-9a-f]{6}$/i.test(source.friendMinimapInGameColor || '')
+          ? source.friendMinimapInGameColor.toLowerCase()
+          : defaults.friendMinimapInGameColor,
       };
     }
 
@@ -10501,6 +11362,7 @@
       blobioVirusPelletColors: 'blobio.settings.virusPelletColors.snapshot',
     };
     const result = { migrated: 0, removed: 0, failed: 0 };
+    const configApplied = storage?.getItem?.('blobio.settings.configApplied') === '1';
     let cookies;
     try {
       cookies = String(document?.cookie || '').split(';').map(entry => entry.trim());
@@ -10519,7 +11381,7 @@
           let raw;
           try { raw = decodeURIComponent(entry.slice(name.length + 1)); } catch { continue; }
           const candidate = parseSnapshot(raw);
-          if (candidate && (!selected || candidate.updatedAt > selected.updatedAt)) {
+          if (!configApplied && candidate && (!selected || candidate.updatedAt > selected.updatedAt)) {
             selected = candidate;
             selectedRaw = raw;
           }
@@ -10653,10 +11515,10 @@
       const right = Math.max(metrics.width, metrics.actualBoundingBoxRight || 0);
       const ascent = Math.max(1, metrics.actualBoundingBoxAscent || 50);
       const descent = Math.max(0, metrics.actualBoundingBoxDescent || 0);
-      const padding = 6;
+      const padding = 4;
       const width = Math.max(1, left + right);
       const height = ascent + descent;
-      const rasterScale = Math.min(1, 2048 / (width + padding * 2), 256 / (height + padding * 2));
+      const rasterScale = Math.min(2, 2048 / (width + padding * 2), 512 / (height + padding * 2));
       canvas.width = Math.ceil((width + padding * 2) * rasterScale);
       canvas.height = Math.ceil((height + padding * 2) * rasterScale);
       context = canvas.getContext('2d');
@@ -10666,8 +11528,8 @@
       context.textAlign = 'left';
       context.textBaseline = 'alphabetic';
       context.lineJoin = 'round';
-      context.lineWidth = 5;
-      context.strokeStyle = '#151515';
+      context.lineWidth = 2;
+      context.strokeStyle = '#1d1d1d';
       context.fillStyle = color;
       context.strokeText(text, padding + left, padding + ascent);
       context.fillText(text, padding + left, padding + ascent);
@@ -10725,8 +11587,8 @@
         layout.d = width;
         layout.b = drawnHeight;
         const bounds = bitmapFont.a.__blobioUnicodeBounds || {};
-        bounds.top = y - 2.5 * scale;
-        bounds.bottom = y + drawnHeight + 2.5 * scale;
+        bounds.top = y - scale;
+        bounds.bottom = y + drawnHeight + scale;
         bitmapFont.a.__blobioUnicodeBounds = bounds;
         state.draws += 1;
         if (cell.p) state.ownDraws += 1;
@@ -10755,8 +11617,8 @@
   /* CELL_RING_RUNTIME_START */
   function pageCellRingBootstrap(initialSettings = {}, pageWindow = globalThis) {
     const win = pageWindow || globalThis;
-    const SCRIPT_VERSION = '0.2.96-glow-falloff-v24';
-    const PATCH_REVISION = 'native-glow-falloff-v24';
+    const SCRIPT_VERSION = '0.4.1-cell-border-sync-v28';
+    const PATCH_REVISION = 'cell-border-sync-v28';
     const host = String(win.location?.hostname || '').toLowerCase();
     if (host && host !== 'custom.client.blobgame.io' && host !== 'blobgame.io') {
       return false;
@@ -10774,7 +11636,7 @@
       win.__blobioCellRingRefresh?.(initialSettings);
       if (!previousState.reloadRequired) {
         previousState.reloadRequired = true;
-        win.console?.warn?.('[Blobio Glow] Update your Blobio loader and reload: the early loader and bundle have different renderer revisions.');
+        win.console?.warn?.('[Blobio Glow] Update loader/blobio-loader.user.js from the official public repository and reload: the early loader and bundle have different renderer revisions.');
       }
       return true;
     }
@@ -10793,13 +11655,11 @@
       HAS_BORDER: 242,
     });
     const RESERVED_SHADER_ALPHA_CODES = new Set(Object.values(SHADER_ALPHA_CODES));
-    const BORDER_SHADER_ALPHA_CODES = new Set([
-      SHADER_ALPHA_CODES.EMPTY_CELL,
-      SHADER_ALPHA_CODES.RAINBOW,
-      SHADER_ALPHA_CODES.HAS_BORDER,
-    ]);
     const OVERLAY_GLOW_SCALE = 2.2;
     const MAX_GLOW_DRAWS_PER_FRAME = 128;
+    const SKIN_SAMPLE_SIZE = 24;
+    const MAX_PENDING_SKIN_SAMPLES = 64;
+    const MAX_SKIN_SAMPLES_PER_TASK = 2;
     const OVERLAY_RENDER_SCALE = 0.78;
     const OVERLAY_CLASS = 'blobio-cell-ring-overlay';
     const GAME_CANVAS_CLASSES_TO_IGNORE = new Set([
@@ -10815,6 +11675,18 @@
     let glowColorCache = null;
     let glowColorCacheRevision = 0;
     let cellAlphaEncodingCache = null;
+    let skinSampleCanvas = null;
+    let skinSampleContext = null;
+    let skinSampleTimer = 0;
+    const skinColorEntries = new WeakMap();
+    const cellSkinEntries = new WeakMap();
+    const pendingSkinSamples = [];
+    const skinColorWeights = new Uint32Array(4096);
+    const skinColorRed = new Uint32Array(4096);
+    const skinColorGreen = new Uint32Array(4096);
+    const skinColorBlue = new Uint32Array(4096);
+    // Native setColor packs these channels immediately and never retains the object.
+    const drawColor = { d: 1, c: 1, b: 1, a: 1 };
     const overlay = {
       targetCanvas: null,
       cssWidth: 0,
@@ -10881,6 +11753,12 @@
         legacySkinUvPassThroughs: 0,
         colorDecisionSamples: 0,
         lastColorDecision: null,
+        skinSamplesQueued: 0,
+        skinSamplesCompleted: 0,
+        skinSamplesFailed: 0,
+        skinSampleCacheHits: 0,
+        skinSampleQueueDrops: 0,
+        syncedBorderColors: 0,
       },
       overlay: {
         frames: 0,
@@ -10919,7 +11797,8 @@
       win.__BlobioCellRingSkinTexture = passThroughLegacySkinTexture;
       win.__BlobioCellRingSkinUv = passThroughLegacySkinUv;
       win.__BlobioCellRingUseBorderlessTexture = shouldUseBorderlessTexture();
-      win.__BlobioCellRingColorAllPlayers = shouldUseBorderlessTexture();
+      win.__BlobioCellRingUseOwnBorderlessTexture = Boolean(settings.enabled && settings.removeOwnCellBorder);
+      win.__BlobioCellRingColorAllPlayers = shouldColorAllPlayers();
       win.__BlobioCellRingBeginFrame = beginFrame;
       win.__BlobioCellRingTrack = trackCell;
       win.__blobCellRingDebug = debugReport;
@@ -10943,6 +11822,9 @@
           encodeCellAlpha,
           getPackedAlphaByte,
           getPlayerDrawTexture,
+          processSkinColorQueue,
+          sampleSkinColor,
+          getDecodedSkinImage,
         };
       }
     }
@@ -10957,7 +11839,8 @@
       glowColorCache = null;
       cellAlphaEncodingCache = null;
       win.__BlobioCellRingUseBorderlessTexture = shouldUseBorderlessTexture();
-      win.__BlobioCellRingColorAllPlayers = shouldUseBorderlessTexture();
+      win.__BlobioCellRingUseOwnBorderlessTexture = Boolean(settings.enabled && settings.removeOwnCellBorder);
+      win.__BlobioCellRingColorAllPlayers = shouldColorAllPlayers();
       return settings;
     }
 
@@ -10991,8 +11874,9 @@
       const size = Number(value.glowSize);
       const borderWidth = Number(value.borderWidth);
       const mode = String(value.mode ?? value.sideGlowMode ?? 'sync').toLowerCase() === 'solid' ? 'solid' : 'sync';
+      const outlineColor = mode === 'solid' && value.outlineColor ? normalizeHexColor(value.outlineColor, null) : null;
       return {
-        enabled: value.enabled === undefined ? true : Boolean(value.enabled),
+        enabled: value.enabled === undefined ? false : Boolean(value.enabled),
         mode,
         solidColor: color,
         alpha: normalizeAlpha(value.alpha ?? value.sideGlowAlpha, 0.72),
@@ -11000,10 +11884,18 @@
           ? 1 : Math.max(0.25, Math.min(3, Math.round(size * 100) / 100)),
         borderWidth: value.borderWidth === null || value.borderWidth === undefined || value.borderWidth === '' || !Number.isFinite(borderWidth)
           ? 1 : Math.max(0, Math.min(6, Math.round(borderWidth * 4) / 4)),
+        outlineColor,
+        outlineAlpha: value.outlineAlpha === null || value.outlineAlpha === undefined || value.outlineAlpha === ''
+          ? null : normalizeAlpha(value.outlineAlpha, null),
+        outlineRed: outlineColor ? parseInt(outlineColor.slice(1, 3), 16) : 0,
+        outlineGreen: outlineColor ? parseInt(outlineColor.slice(3, 5), 16) : 0,
+        outlineBlue: outlineColor ? parseInt(outlineColor.slice(5, 7), 16) : 0,
         transparentCell: Boolean(value.transparentCell),
         cellAlpha: normalizeAlpha(value.cellAlpha, 0.75),
         nameStyle: normalizeNameStyle(value.nameStyle),
+        removeOwnCellBorder: Boolean(value.removeOwnCellBorder),
         removeAllCellBorders: Boolean(value.removeAllCellBorders ?? value.disabledCellRings),
+        cellBorderSync: Boolean(value.cellBorderSync),
         syncColor: mode === 'sync',
         red: parseInt(color.slice(1, 3), 16),
         green: parseInt(color.slice(3, 5), 16),
@@ -11033,6 +11925,7 @@
     function isRuntimeActive() {
       return Boolean(settings.enabled && (
         shouldMarkOwnCells()
+        || settings.removeOwnCellBorder
         || settings.removeAllCellBorders
       ));
     }
@@ -11062,24 +11955,35 @@
 
       const featureEnabled = settings.enabled;
       const applyTransparency = ownCell && featureEnabled && settings.transparentCell;
-      const removeBorders = featureEnabled && settings.removeAllCellBorders;
-      if (!applyTransparency && !removeBorders) {
-        return color;
-      }
-
+      const removeBorders = featureEnabled && (settings.removeAllCellBorders || (ownCell && settings.removeOwnCellBorder));
       const nativeAlphaByte = getPackedAlphaByte(color.a);
-      const suppressBorder = removeBorders
-        && BORDER_SHADER_ALPHA_CODES.has(nativeAlphaByte);
-      if (!applyTransparency && !suppressBorder) {
-        return color;
-      }
-
       const skin = skinDraw === undefined
         ? Boolean(!cell?.t && cell?.P)
         : skinDraw === true;
+      const syncedColor = settings.cellBorderSync
+        && skin
+        && !applyTransparency
+        && !removeBorders
+        && nativeAlphaByte === SHADER_ALPHA_CODES.HAS_BORDER
+        ? getResolvedSkinColor(cell)
+        : null;
+      if (!applyTransparency && !removeBorders && !syncedColor) {
+        return color;
+      }
+
+      const suppressBorder = removeBorders
+        && (nativeAlphaByte === SHADER_ALPHA_CODES.EMPTY_CELL
+          || nativeAlphaByte === SHADER_ALPHA_CODES.RAINBOW
+          || nativeAlphaByte === SHADER_ALPHA_CODES.HAS_BORDER);
+      if (!applyTransparency && !suppressBorder && !syncedColor) {
+        return color;
+      }
+
       if (skin) {
         state.markers.skinColorMarks += 1;
-        state.markers.skinNeutralizations += 1;
+        if (!syncedColor) {
+          state.markers.skinNeutralizations += 1;
+        }
       } else {
         state.markers.normalColorMarks += 1;
       }
@@ -11107,6 +12011,7 @@
           cellId: String(cell?.b ?? cell?.a ?? cell?.id ?? ''),
           ownCell,
           skinDraw: skin,
+          borderColorSynced: Boolean(syncedColor),
           transparencyApplied: applyTransparency,
           borderSuppressed: suppressBorder,
           requestedAlpha: roundDebugNumber(alpha?.requested ?? 1),
@@ -11120,17 +12025,21 @@
         };
       }
 
-      return {
-        d: skin ? 1 : color.d,
-        c: skin ? 1 : color.c,
-        b: skin ? 1 : color.b,
-        a: alpha?.value ?? 1,
-      };
+      drawColor.d = syncedColor?.r ?? (skin ? 1 : color.d);
+      drawColor.c = syncedColor?.g ?? (skin ? 1 : color.c);
+      drawColor.b = syncedColor?.b ?? (skin ? 1 : color.b);
+      drawColor.a = alpha?.value ?? (suppressBorder ? 1 : color.a);
+      if (syncedColor) {
+        state.markers.syncedBorderColors += 1;
+      }
+      return drawColor;
     }
 
     function getPackedAlphaByte(value) {
-      const alpha = Math.max(0, Math.min(1, Number(value) || 0));
-      return Math.floor(alpha * 255) & 0xfe;
+      const alpha = Number(value) || 0;
+      if (alpha >= 1) return 254;
+      if (alpha <= 0) return 0;
+      return (alpha * 255) & 0xfe;
     }
 
     function encodeCellAlpha(value) {
@@ -11195,8 +12104,16 @@
       return Boolean(settings.enabled && settings.removeAllCellBorders);
     }
 
+    function shouldColorAllPlayers() {
+      return shouldUseBorderlessTexture() || settings.cellBorderSync;
+    }
+
     function getPlayerDrawTexture(cell, textureRegion, defaultTexture = false) {
-      if (!defaultTexture || !shouldUseBorderlessTexture() || getCellType(cell) !== 1) {
+      if (!defaultTexture && settings.cellBorderSync && isSkinBorderSyncEligible(cell)) {
+        rememberSkinTexture(cell, textureRegion);
+      }
+      if (!defaultTexture || getCellType(cell) !== 1 || !settings.enabled
+          || (!settings.removeAllCellBorders && !(settings.removeOwnCellBorder && cell.p))) {
         return textureRegion;
       }
 
@@ -11213,6 +12130,302 @@
         state.markers.foreignDefaultTextureSubstitutions += 1;
       }
       return borderlessTexture;
+    }
+
+    function rememberSkinTexture(cell, textureRegion) {
+      if (!cell || !textureRegion || !isSkinBorderSyncEligible(cell)) {
+        return;
+      }
+
+      let entry = skinColorEntries.get(textureRegion);
+      if (entry) {
+        state.markers.skinSampleCacheHits += 1;
+        cellSkinEntries.set(cell, entry);
+        if (entry.status === 'deferred' && isImageReady(entry.image)) {
+          queueSkinColorSample(entry);
+        }
+        return;
+      }
+
+      entry = {
+        textureRegion,
+        image: getDecodedSkinImage(textureRegion),
+        color: null,
+        status: 'loading',
+      };
+      skinColorEntries.set(textureRegion, entry);
+      cellSkinEntries.set(cell, entry);
+
+      if (!entry.image) {
+        failSkinColorSample(entry);
+        return;
+      }
+      if (isImageReady(entry.image)) {
+        queueSkinColorSample(entry);
+        return;
+      }
+      if (typeof entry.image.addEventListener !== 'function') {
+        failSkinColorSample(entry);
+        return;
+      }
+
+      entry.image.addEventListener('load', () => queueSkinColorSample(entry), { once: true });
+      entry.image.addEventListener('error', () => failSkinColorSample(entry), { once: true });
+    }
+
+    function getDecodedSkinImage(textureRegion) {
+      const textureData = textureRegion?.v?.a;
+      const directImage = textureData?.a;
+      if (isDecodedImage(directImage)) {
+        return directImage;
+      }
+
+      const fileHandle = textureData?.a;
+      const path = fileHandle?.a;
+      const preloadedImages = fileHandle?.b?.e;
+      const keys = preloadedImages?.o;
+      const values = preloadedImages?.B;
+      if (typeof path !== 'string' || typeof keys?.length !== 'number' || typeof values?.length !== 'number') {
+        return null;
+      }
+
+      for (let index = 0; index < keys.length; index += 1) {
+        if (keys[index] === path && isDecodedImage(values[index])) {
+          return values[index];
+        }
+      }
+      return null;
+    }
+
+    function isDecodedImage(value) {
+      return Boolean(value && typeof value === 'object' && (
+        'complete' in value
+        || typeof value.decode === 'function'
+        || typeof value.addEventListener === 'function' && ('naturalWidth' in value || 'width' in value)
+      ));
+    }
+
+    function isImageReady(image) {
+      return image?.complete !== false
+        && Number(image?.naturalWidth || image?.width) > 0
+        && Number(image?.naturalHeight || image?.height) > 0;
+    }
+
+    function queueSkinColorSample(entry) {
+      if (!entry || entry.status === 'queued' || entry.status === 'resolved' || entry.status === 'failed') {
+        return;
+      }
+      if (pendingSkinSamples.length >= MAX_PENDING_SKIN_SAMPLES) {
+        state.markers.skinSampleQueueDrops += 1;
+        entry.status = 'deferred';
+        return;
+      }
+
+      entry.status = 'queued';
+      pendingSkinSamples.push(entry);
+      state.markers.skinSamplesQueued += 1;
+      scheduleSkinColorSamples();
+    }
+
+    function scheduleSkinColorSamples() {
+      if (skinSampleTimer || pendingSkinSamples.length === 0) {
+        return;
+      }
+
+      if (typeof win.requestIdleCallback === 'function') {
+        skinSampleTimer = win.requestIdleCallback(processSkinColorQueue, { timeout: 250 });
+      } else {
+        const schedule = win.setTimeout || globalThis.setTimeout;
+        skinSampleTimer = schedule(() => processSkinColorQueue(), 0);
+      }
+    }
+
+    function processSkinColorQueue(deadline, drain = false) {
+      skinSampleTimer = 0;
+      let processed = 0;
+      while (pendingSkinSamples.length > 0
+          && (drain || processed < MAX_SKIN_SAMPLES_PER_TASK)
+          && (drain
+            || (deadline?.didTimeout && processed === 0)
+            || !deadline?.timeRemaining
+            || deadline.timeRemaining() > 1)) {
+        const entry = pendingSkinSamples.shift();
+        try {
+          entry.color = sampleSkinColor(entry.image, entry.textureRegion);
+          if (!entry.color) {
+            failSkinColorSample(entry);
+          } else {
+            entry.status = 'resolved';
+            state.markers.skinSamplesCompleted += 1;
+          }
+        } catch {
+          failSkinColorSample(entry);
+        }
+        processed += 1;
+      }
+
+      if (pendingSkinSamples.length > 0) {
+        scheduleSkinColorSamples();
+      }
+      return processed;
+    }
+
+    function failSkinColorSample(entry) {
+      if (!entry || entry.status === 'failed') {
+        return;
+      }
+      entry.status = 'failed';
+      entry.color = null;
+      state.markers.skinSamplesFailed += 1;
+    }
+
+    function getResolvedSkinColor(cell) {
+      const entry = cellSkinEntries.get(cell);
+      if (!entry || entry.textureRegion !== cell?.P || entry.status !== 'resolved') {
+        return null;
+      }
+      return entry.color;
+    }
+
+    function isSkinBorderSyncEligible(cell) {
+      return getCellType(cell) === 1
+        && getPackedAlphaByte(cell?.K?.a) === SHADER_ALPHA_CODES.HAS_BORDER;
+    }
+
+    function sampleSkinColor(image, textureRegion) {
+      const context = getSkinSampleContext();
+      if (!context) {
+        return null;
+      }
+
+      const imageWidth = Number(image?.naturalWidth || image?.width);
+      const imageHeight = Number(image?.naturalHeight || image?.height);
+      const left = normalizeTextureCoordinate(textureRegion?.w, 0);
+      const right = normalizeTextureCoordinate(textureRegion?.A, 1);
+      const top = normalizeTextureCoordinate(textureRegion?.C, 0);
+      const bottom = normalizeTextureCoordinate(textureRegion?.B, 1);
+      const sourceX = Math.min(left, right) * imageWidth;
+      const sourceY = Math.min(top, bottom) * imageHeight;
+      const sourceWidth = Math.max(1, Math.abs(right - left) * imageWidth);
+      const sourceHeight = Math.max(1, Math.abs(bottom - top) * imageHeight);
+
+      context.clearRect(0, 0, SKIN_SAMPLE_SIZE, SKIN_SAMPLE_SIZE);
+      context.drawImage(
+        image,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        SKIN_SAMPLE_SIZE,
+        SKIN_SAMPLE_SIZE,
+      );
+      const pixels = context.getImageData(0, 0, SKIN_SAMPLE_SIZE, SKIN_SAMPLE_SIZE).data;
+      skinColorWeights.fill(0);
+      skinColorRed.fill(0);
+      skinColorGreen.fill(0);
+      skinColorBlue.fill(0);
+
+      let opaqueWeight = 0;
+      let chromaticWeight = 0;
+      const center = SKIN_SAMPLE_SIZE / 2;
+      const radiusSquared = (SKIN_SAMPLE_SIZE * 0.488) ** 2;
+      for (let y = 0; y < SKIN_SAMPLE_SIZE; y += 1) {
+        const dy = y + 0.5 - center;
+        for (let x = 0; x < SKIN_SAMPLE_SIZE; x += 1) {
+          const dx = x + 0.5 - center;
+          if (dx * dx + dy * dy > radiusSquared) {
+            continue;
+          }
+
+          const offset = (y * SKIN_SAMPLE_SIZE + x) * 4;
+          const alpha = pixels[offset + 3];
+          if (alpha < 32) {
+            continue;
+          }
+          const red = pixels[offset];
+          const green = pixels[offset + 1];
+          const blue = pixels[offset + 2];
+          const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
+          const bucket = (red >> 4) << 8 | (green >> 4) << 4 | (blue >> 4);
+          skinColorWeights[bucket] += alpha;
+          skinColorRed[bucket] += red * alpha;
+          skinColorGreen[bucket] += green * alpha;
+          skinColorBlue[bucket] += blue * alpha;
+          opaqueWeight += alpha;
+          if (saturation >= 36 && Math.max(red, green, blue) >= 48) {
+            chromaticWeight += alpha;
+          }
+        }
+      }
+
+      if (opaqueWeight === 0) {
+        return null;
+      }
+
+      const preferChromatic = chromaticWeight >= opaqueWeight * 0.08;
+      let bestBucket = -1;
+      let bestScore = -1;
+      for (let bucket = 0; bucket < skinColorWeights.length; bucket += 1) {
+        const weight = skinColorWeights[bucket];
+        if (weight === 0) {
+          continue;
+        }
+        const red = skinColorRed[bucket] / weight;
+        const green = skinColorGreen[bucket] / weight;
+        const blue = skinColorBlue[bucket] / weight;
+        const saturation = Math.max(red, green, blue) - Math.min(red, green, blue);
+        const chromatic = saturation >= 36 && Math.max(red, green, blue) >= 48;
+        if (preferChromatic !== chromatic) {
+          continue;
+        }
+        const score = weight * (256 + (preferChromatic ? saturation : 0));
+        if (score > bestScore) {
+          bestScore = score;
+          bestBucket = bucket;
+        }
+      }
+
+      if (bestBucket < 0) {
+        return null;
+      }
+      const weight = skinColorWeights[bestBucket];
+      let red = Math.round(skinColorRed[bestBucket] / weight);
+      const green = Math.round(skinColorGreen[bestBucket] / weight);
+      const blue = Math.round(skinColorBlue[bestBucket] / weight);
+      if (red > 249 && green < 26 && blue < 26) {
+        red = 249;
+      }
+      return {
+        r: red / 255,
+        g: green / 255,
+        b: blue / 255,
+        red,
+        green,
+        blue,
+      };
+    }
+
+    function normalizeTextureCoordinate(value, fallback) {
+      const coordinate = Number(value);
+      return Number.isFinite(coordinate) ? Math.max(0, Math.min(1, coordinate)) : fallback;
+    }
+
+    function getSkinSampleContext() {
+      if (skinSampleContext) {
+        return skinSampleContext;
+      }
+      skinSampleCanvas = typeof win.OffscreenCanvas === 'function'
+        ? new win.OffscreenCanvas(SKIN_SAMPLE_SIZE, SKIN_SAMPLE_SIZE)
+        : win.document?.createElement?.('canvas');
+      if (!skinSampleCanvas) {
+        return null;
+      }
+      skinSampleCanvas.width = SKIN_SAMPLE_SIZE;
+      skinSampleCanvas.height = SKIN_SAMPLE_SIZE;
+      skinSampleContext = skinSampleCanvas.getContext?.('2d', { willReadFrequently: true }) || null;
+      return skinSampleContext;
     }
 
     function passThroughLegacySkinTexture(_cell, textureRegion) {
@@ -11241,48 +12454,55 @@
         .replace(assignment, assignment + '\n' + [
           '    v_blobioGlowRadius = 0.0;',
           '    v_blobioBorderWidth = 0.0;',
-          '    if (a_texCoord0.y >= -3.1 && a_texCoord0.y <= -2.0',
+          '    if (a_texCoord0.y >= -3.6 && a_texCoord0.y <= -2.0',
           '        && ((a_texCoord0.x > -3.0 && a_texCoord0.x < -2.0)',
           '            || (a_texCoord0.x > 3.0 && a_texCoord0.x < 4.0))) {',
           '        v_blobioGlowRadius = a_texCoord0.x < 0.0 ? -a_texCoord0.x - 2.0 : a_texCoord0.x - 3.0;',
-          '        v_blobioBorderWidth = -a_texCoord0.y - (a_texCoord0.y > -2.5 ? 2.0 : 3.0);',
-          '        v_texCoords = vec2(a_texCoord0.x < 0.0 ? 0.0 : 1.0, a_texCoord0.y > -2.5 ? 0.0 : 1.0);',
+          '        v_blobioBorderWidth = -a_texCoord0.y - (a_texCoord0.y > -3.0 ? 2.0 : 3.0);',
+          '        v_texCoords = vec2(a_texCoord0.x < 0.0 ? 0.0 : 1.0, a_texCoord0.y > -3.0 ? 0.0 : 1.0);',
           '    }',
         ].join('\n'));
       state.shader.glowVertexPatched = true;
       return patched;
     }
 
-    function patchFragmentShaderSource(source) {
-      let original = String(source || '');
-      if (state.shader.glowVertexPatched && !original.includes('v_blobioGlowRadius')
-          && /void main\s*\(\s*\)\s*\{/.test(original)) {
-        original = original.replace(/void main\s*\(\s*\)\s*\{/, [
-          'varying mediump float v_blobioGlowRadius;',
-          'varying mediump float v_blobioBorderWidth;',
-          'void main() {',
-          '    if (v_blobioGlowRadius > 0.0) {',
-          '        float d = length(v_texCoords * 2.0 - 1.0);',
-          '        float r = v_blobioGlowRadius;',
-          '        float width = r * v_blobioBorderWidth;',
-          '        if (d >= 1.0 || d <= r - width) { discard; }',
-          '        float core = width > 0.0 ? smoothstep(r - width, r - width + min(r * 0.005, width * 0.33), d)',
-          '            * (1.0 - smoothstep(r * 0.998, r * 1.003, d)) : 0.0;',
-          // Approximate the preview's 12/30/58px box shadows around its 132px circle.
-          // The quad includes the faint tail; its boundary is not the halo's falloff curve.
-          '        float outside = max(0.0, d - r) / (1.0 - r);',
-          '        vec3 distance = outside / vec3(0.07576, 0.18939, 0.36616);',
-          '        vec3 shadows = vec3(0.375, 0.26, 0.17)',
-          '            * exp2(-1.151 * distance - 0.505 * distance * distance);',
-          '        float halo = (1.0 - (1.0 - shadows.x) * (1.0 - shadows.y) * (1.0 - shadows.z))',
-          '            * (width > 0.0 ? smoothstep(r - width * 0.67, r, d) : 1.0)',
-          '            * (1.0 - smoothstep(0.85, 1.0, outside));',
-          '        float alpha = (core + (1.0 - core) * halo) * min(1.0, v_color.a * (255.0 / 254.0));',
-          '        gl_FragColor = vec4(v_color.rgb, alpha);',
-          '        return;',
-          '    }',
-        ].join('\n'));
+    function patchGlowFragmentShader(source) {
+      if (!state.shader.glowVertexPatched || source.includes('v_blobioGlowRadius')) {
+        return source;
       }
+      return source.replace(/void main\s*\(\s*\)\s*\{/, [
+        'varying mediump float v_blobioGlowRadius;',
+        'varying mediump float v_blobioBorderWidth;',
+        'void main() {',
+        '    if (v_blobioGlowRadius > 0.0) {',
+        '        float d = length(v_texCoords * 2.0 - 1.0);',
+        '        float r = v_blobioGlowRadius;',
+        '        float glowMode = floor(v_blobioBorderWidth * 4.0);',
+        '        float width = r * (v_blobioBorderWidth - glowMode * 0.25);',
+        '        if (d >= 1.0 || d <= r - width) { discard; }',
+        '        float core = width > 0.0 ? smoothstep(r - width, r - width + min(r * 0.005, width * 0.33), d)',
+        '            * (1.0 - smoothstep(r * 0.998, r * 1.003, d)) : 0.0;',
+        // Approximate the preview's 12/30/58px box shadows around its 132px circle.
+        // The quad includes the faint tail; its boundary is not the halo's falloff curve.
+        '        float outside = max(0.0, d - r) / (1.0 - r);',
+        '        vec3 distance = outside / vec3(0.07576, 0.18939, 0.36616);',
+        '        vec3 shadows = vec3(0.375, 0.26, 0.17)',
+        '            * exp2(-1.151 * distance - 0.505 * distance * distance);',
+        '        float halo = (1.0 - (1.0 - shadows.x) * (1.0 - shadows.y) * (1.0 - shadows.z))',
+        '            * (width > 0.0 ? smoothstep(r - width * 0.67, r, d) : 1.0)',
+        '            * (1.0 - smoothstep(0.85, 1.0, outside));',
+        '        float coverage = core + (1.0 - core) * halo;',
+        '        if (glowMode > 1.5) { coverage = core; }',
+        '        else if (glowMode > 0.5) { coverage = (1.0 - core) * halo; }',
+        '        float alpha = coverage * min(1.0, v_color.a * (255.0 / 254.0));',
+        '        gl_FragColor = vec4(v_color.rgb, alpha);',
+        '        return;',
+        '    }',
+      ].join('\n'));
+    }
+
+    function patchFragmentShaderSource(source) {
+      const original = patchGlowFragmentShader(String(source || ''));
       state.shader.glowFragmentPatched = original.includes('v_blobioGlowRadius');
       state.shader.sourceCalls += 1;
       state.shader.lastSourceLength = original.length;
@@ -11292,9 +12512,10 @@
           ? 'no-border'
           : 'unknown';
 
-      if (!original || original.includes(SHADER_PATCH_MARKER)) {
-        state.shader.lastComparisonsPatched = original.includes(SHADER_PATCH_MARKER) ? -1 : 0;
-        state.shader.lastOpacityMultipliersPatched = original.includes(SHADER_PATCH_MARKER) ? -1 : 0;
+      const alreadyPatched = original.includes(SHADER_PATCH_MARKER);
+      if (!original || alreadyPatched) {
+        state.shader.lastComparisonsPatched = alreadyPatched ? -1 : 0;
+        state.shader.lastOpacityMultipliersPatched = alreadyPatched ? -1 : 0;
         return original;
       }
 
@@ -11365,7 +12586,7 @@
     }
 
     function trackCell(cell, projectionMatrix, batch, texture, setColor, drawTexture) {
-      if (!settings.enabled || settings.alpha <= 0 || !isOwnCell(cell)) {
+      if (!settings.enabled || (settings.alpha <= 0 && (settings.borderWidth <= 0 || (settings.outlineAlpha ?? settings.alpha) <= 0)) || !isOwnCell(cell)) {
         return false;
       }
       state.overlay.trackCalls += 1;
@@ -11392,20 +12613,57 @@
       }
       const pixelRadius = Math.max(2, info.radius * overlay.dpr);
       const glowRadius = pixelRadius + Math.max(7, pixelRadius * (OVERLAY_GLOW_SCALE - 1)) * settings.glowSize;
-      if (!isNearViewport(info.x, info.y, glowRadius / overlay.dpr)) {
+      const liquidJellyEnabled = win.__blobioLiquidJellyEnabled && win.__BlobioLiquidJellyMotion;
+      if (!isNearViewport(info.x, info.y, glowRadius / overlay.dpr * (liquidJellyEnabled ? 1.16 : 1))) {
         state.overlay.skipped += 1;
         state.overlay.trackViewportSkips += 1;
         return false;
       }
       const innerRadius = Math.max(0.01, Math.min(0.98, pixelRadius / glowRadius));
       const borderWidth = settings.borderWidth / 66;
-      const worldRadius = radius * glowRadius / (info.radius * overlay.dpr);
+      let worldRadius = radius * glowRadius / (info.radius * overlay.dpr);
+      let x = cell.R;
+      let y = cell.S;
+      let leftUv = -2 - innerRadius;
+      let rightUv = 3 + innerRadius;
+      let topUv = -2 - borderWidth;
+      let bottomUv = -3 - borderWidth;
+      if (liquidJellyEnabled) {
+        const motion = win.__BlobioLiquidJellyMotion(cell);
+        // Integer fields carry deformation; fractions retain the native ring widths.
+        const descriptor = 8 + (Math.round(motion.contactX * 4096) + 64) * 128
+          + Math.round(motion.x * 1024) + 64 + innerRadius;
+        leftUv = -descriptor;
+        rightUv = descriptor;
+        topUv = -8 - (Math.round(motion.contactY * 4096) + 64) * 128
+          - Math.round(motion.y * 1024) - 64 - borderWidth;
+        bottomUv = topUv - 16384;
+        x += motion.offsetX;
+        y += motion.offsetY;
+        worldRadius *= 1.1;
+      }
       const color = getCellGlowColor(cell);
+      const outlineAlpha = settings.outlineAlpha ?? settings.alpha;
+      const customOutline = settings.outlineColor !== null || settings.outlineAlpha !== null;
+      const glowUvOffset = customOutline ? 0.25 : 0;
       const previousColor = batch.f;
       try {
-        setColor(batch, { d: color.r, c: color.g, b: color.b, a: color.a });
-        drawTexture(batch, texture, cell.R - worldRadius, cell.S - worldRadius,
-          worldRadius * 2, worldRadius * 2, -2 - innerRadius, -2 - borderWidth, 3 + innerRadius, -3 - borderWidth);
+        if (settings.alpha > 0) {
+          setColor(batch, { d: color.r, c: color.g, b: color.b, a: color.a });
+          drawTexture(batch, texture, x - worldRadius, y - worldRadius,
+            worldRadius * 2, worldRadius * 2, leftUv, topUv - glowUvOffset,
+            rightUv, bottomUv - glowUvOffset);
+        }
+        if (customOutline && settings.borderWidth > 0 && outlineAlpha > 0) {
+          setColor(batch, {
+            d: settings.outlineColor ? settings.outlineRed / 255 : color.r,
+            c: settings.outlineColor ? settings.outlineGreen / 255 : color.g,
+            b: settings.outlineColor ? settings.outlineBlue / 255 : color.b,
+            a: outlineAlpha,
+          });
+          drawTexture(batch, texture, x - worldRadius, y - worldRadius,
+            worldRadius * 2, worldRadius * 2, leftUv, topUv - 0.5, rightUv, bottomUv - 0.5);
+        }
       } finally {
         batch.f = previousColor;
       }
@@ -11536,6 +12794,18 @@
       const fallback = getStaticGlowColor();
       if (settings.mode !== 'sync') {
         return fallback;
+      }
+
+      const skinColor = settings.cellBorderSync && isSkinBorderSyncEligible(cell)
+        ? getResolvedSkinColor(cell)
+        : null;
+      if (skinColor) {
+        return {
+          r: skinColor.r,
+          g: skinColor.g,
+          b: skinColor.b,
+          a: fallback.a,
+        };
       }
 
       const color = readGameColor(cell?.K);
@@ -11775,12 +13045,12 @@
         state.bundle.playerTextureDrawsPatched,
         result.playerTextureDrawsPatched,
       );
-      if (!result.changed) {
-        return chunk;
+      if (result.changed) {
+        state.bundle.patchedChunks += 1;
       }
-
-      state.bundle.patchedChunks += 1;
-      return result.code;
+      return win.__BlobioLiquidJellyPatchBundle
+        ? win.__BlobioLiquidJellyPatchBundle(result.code)
+        : result.code;
     }
 
     function patchBundle(source) {
@@ -11972,6 +13242,17 @@
       const playerEnd = code.indexOf('break;case 4:case 3:', playerStart);
       if (playerStart >= 0 && playerEnd > playerStart) {
         let playerCode = code.slice(playerStart, playerEnd);
+        if (!playerCode.includes('__BlobioCellRingTexture(g,h,false)')) {
+          const croppedSkinDraw = /([A-Za-z_$][\w$]*)=g\.M\/g\.O;([A-Za-z_$][\w$]*)\(a\.c,h\.v,g\.R-g\.M,g\.S-g\.M,g\.N,g\.N,1-\1,1-\1,\1,\1\)/;
+          const withCroppedTextureHook = playerCode.replace(croppedSkinDraw, (drawCall, crop, drawUv) => (
+            `${crop}=g.M/g.O;$wnd.__BlobioCellRingTexture&&$wnd.__BlobioCellRingTexture(g,h,false);`
+            + `${drawUv}(a.c,h.v,g.R-g.M,g.S-g.M,g.N,g.N,1-${crop},1-${crop},${crop},${crop})`
+          ));
+          if (withCroppedTextureHook !== playerCode) {
+            playerCode = withCroppedTextureHook;
+            drawsPatched += 1;
+          }
+        }
         if (!playerCode.includes('__BlobioCellRingTexture(g,h,h==Yxe)')) {
           const playerRegionDraw = /([A-Za-z_$][\w$]*)\(a\.c,h,g\.R-g\.M,g\.S-g\.M,g\.N,g\.N\)/;
           const withTextureHook = playerCode.replace(playerRegionDraw, (drawCall, drawRegion) => (
@@ -12069,7 +13350,7 @@
         const playerDraw = new RegExp(`([A-Za-z_$][\\w$]*)\\(a\\.c,${escapedTexture},g\\.R-g\\.M,g\\.S-g\\.M,g\\.N,g\\.N\\)`);
         const patchedPlayerCode = playerCode.replace(playerDraw, (drawCall, drawRegion) => {
           drawsPatched += 1;
-          const selectedTexture = `$wnd.__BlobioCellRingUseBorderlessTexture&&${borderlessTexture}?${borderlessTexture}:${nativeTexture}`;
+          const selectedTexture = `($wnd.__BlobioCellRingUseBorderlessTexture||g.p&&$wnd.__BlobioCellRingUseOwnBorderlessTexture)&&${borderlessTexture}?${borderlessTexture}:${nativeTexture}`;
           return `${drawRegion}(a.c,${selectedTexture},g.R-g.M,g.S-g.M,g.N,g.N)`;
         });
         code = code.slice(0, playerStart) + patchedPlayerCode + code.slice(playerEnd);
@@ -12078,7 +13359,7 @@
       const fallbackDraw = new RegExp(`(else\\{b\\.K\\.a=0\\.75;[A-Za-z_$][\\w$]*\\(a\\.c,[^;]+\\);)([A-Za-z_$][\\w$]*)\\(a\\.c,${escapedTexture},b\\.R-b\\.M,b\\.S-b\\.M,b\\.N,b\\.N\\)`);
       code = code.replace(fallbackDraw, (drawCall, prefix, drawRegion) => {
         drawsPatched += 1;
-        const selectedTexture = `$wnd.__BlobioCellRingUseBorderlessTexture&&b.c&&b.c.M==1&&${borderlessTexture}?${borderlessTexture}:${nativeTexture}`;
+        const selectedTexture = `($wnd.__BlobioCellRingUseBorderlessTexture||b.p&&$wnd.__BlobioCellRingUseOwnBorderlessTexture)&&b.c&&b.c.M==1&&${borderlessTexture}?${borderlessTexture}:${nativeTexture}`;
         return `${prefix}${drawRegion}(a.c,${selectedTexture},b.R-b.M,b.S-b.M,b.N,b.N)`;
       });
 
@@ -12173,11 +13454,11 @@
           foreignColorHookConfigured: Boolean(win.__BlobioCellRingColorAllPlayers),
           colorHookPatched: state.bundle.colorHookPatched,
           ownSkinRgbNeutralWhenTransparent: true,
-          foreignColorsChangedOnlyForBorderRemoval: true,
+          foreignColorsChangedOnlyForBorderRemoval: !settings.cellBorderSync,
           customAlphaEncodingUsed: true,
           textureUploadTrackingUsed: false,
           cellFragmentShaderPatched: hasCompleteShaderPatch(),
-          borderlessTextureActive: shouldUseBorderlessTexture(),
+          borderlessTextureActive: Boolean(settings.enabled && (settings.removeAllCellBorders || settings.removeOwnCellBorder)),
           skinIdentitySource: 'draw-texture-sentinel',
           borderRemovalMechanism: 'shader-mode-suppression-plus-opaque-borderless-texture',
           opaquePackedAlphaNormalized: hasOpaqueAlphaPatch(),
@@ -12195,6 +13476,7 @@
         },
         borderRemoval: {
           requested: shouldUseBorderlessTexture(),
+          ownRequested: Boolean(settings.enabled && settings.removeOwnCellBorder),
           foreignColorHookConfigured: Boolean(win.__BlobioCellRingColorAllPlayers),
           colorHookPatched: state.bundle.colorHookPatched,
           borderSuppressions: state.markers.borderSuppressions,
@@ -12255,7 +13537,9 @@
         transparentCell: value.transparentCell,
         cellAlpha: value.cellAlpha,
         nameStyle: value.nameStyle,
+        removeOwnCellBorder: value.removeOwnCellBorder,
         removeAllCellBorders: value.removeAllCellBorders,
+        cellBorderSync: value.cellBorderSync,
         effectiveCellAlpha: getEffectiveCellAlpha(),
       };
     }
@@ -12719,7 +14003,7 @@
   /* RENDER_PERFORMANCE_RUNTIME_END */
 
   /* FPS_SAVER_RUNTIME_START */
-  const FPS_SAVER_VERSION = '0.1.1';
+  const FPS_SAVER_VERSION = '0.1.2';
   const FPS_SAVER_PAGE_HOOK = '__BlobPerfSaver';
   const FPS_SAVER_RUNTIME_HOOK = '__BlobioFpsSaver';
   const FPS_SAVER_STYLE_ID = 'blobio-fps-saver-style';
@@ -13360,18 +14644,21 @@
       cleanupScheduled = true;
       scheduleFrame(root, () => {
         cleanupScheduled = false;
+        if (!state.settings.chatGuard || !state.chatObserver) return;
         trimChat(chat, state);
       });
     });
-    state.chatObserver.observe(chat, { childList: true });
+    state.chatObserver.observe(chat, { childList: true, subtree: true });
     trimChat(chat, state);
   }
 
   function trimChat(chat, state) {
+    // Smooth chat wraps messages in a list; keep the wrapper and its handlers intact.
+    const list = chat.querySelector?.('ul') || chat;
     const max = state.settings.maxChatRows;
     let removed = 0;
-    while (chat.children && chat.children.length > max) {
-      chat.removeChild(chat.firstElementChild || chat.firstChild);
+    while (list.children && list.children.length > max) {
+      list.removeChild(list.firstElementChild || list.firstChild);
       removed += 1;
     }
     state.counters.chatTrimmed += removed;
@@ -13449,7 +14736,7 @@
         mainLite: Boolean(doc?.documentElement?.classList?.contains?.('blobio-fps-saver-main-lite')),
         overlayContain: Boolean(doc?.documentElement?.classList?.contains?.('blobio-fps-saver-overlay-contain')),
         toastLite: Boolean(doc?.documentElement?.classList?.contains?.('blobio-fps-saver-toast-lite')),
-        chatRows: Number(doc?.getElementById?.('chat')?.children?.length) || 0,
+        chatRows: Number((doc?.getElementById?.('chat')?.querySelector?.('ul') || doc?.getElementById?.('chat'))?.children?.length) || 0,
       },
       errors: state.errors.slice(),
     };
@@ -13716,6 +15003,41 @@
     });
   }
 
+  function installLiquidJellyRuntime() {
+    if (location.hostname !== CUSTOM_CLIENT_HOST) {
+      return;
+    }
+
+    const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    try {
+      pageLiquidJellyBootstrap(readLiquidJellyRuntimeSettings(), pageWindow);
+    } catch (error) {
+      logError('Failed to install Liquid Jelly runtime.', error);
+      return;
+    }
+
+    const refresh = () => {
+      try {
+        pageWindow.__blobioLiquidJellyRefresh?.(readLiquidJellyRuntimeSettings());
+      } catch (error) {
+        logError('Failed to refresh Liquid Jelly runtime.', error);
+      }
+    };
+
+    if (typeof GM_addValueChangeListener === 'function') {
+      try {
+        GM_addValueChangeListener(LIQUID_JELLY_KEY, refresh);
+      } catch {}
+    }
+
+    window.addEventListener?.('message', (event) => {
+      const message = event.data;
+      if (message?.source === STORAGE_BRIDGE_SOURCE && message.key === LIQUID_JELLY_KEY) {
+        refresh();
+      }
+    });
+  }
+
   function installJellyShaderRuntime() {
     if (location.hostname !== CUSTOM_CLIENT_HOST) {
       return;
@@ -13803,7 +15125,10 @@
 
     try {
       pageUnicodeNamesBootstrap(pageWindow, UNICODE_NAME_ASSETS.flags);
-      pageCellMassBootstrap(readCellMassRuntimeSettings(), pageWindow);
+      pageCellMassBootstrap({
+        ...readCellMassRuntimeSettings(),
+        ...readFriendMinimapRuntimeSettings(),
+      }, pageWindow);
     } catch (error) {
       logError('Failed to install Show mass runtime.', error);
       return;
@@ -13811,7 +15136,10 @@
 
     const refresh = () => {
       try {
-        pageWindow.__blobioCellMassRefresh?.(readCellMassRuntimeSettings());
+        pageWindow.__blobioCellMassRefresh?.({
+          ...readCellMassRuntimeSettings(),
+          ...readFriendMinimapRuntimeSettings(),
+        });
       } catch (error) {
         logError('Failed to refresh Show mass runtime.', error);
       }
@@ -13821,14 +15149,32 @@
       try {
         GM_addValueChangeListener(CELL_MASS_SNAPSHOT_KEY, refresh);
       } catch {}
+      for (const key of Object.values(FRIEND_MINIMAP_KEYS)) {
+        try {
+          GM_addValueChangeListener(key, refresh);
+        } catch {}
+      }
     }
 
     window.addEventListener?.('message', (event) => {
       const message = event.data;
-      if (message?.source === STORAGE_BRIDGE_SOURCE && message.key === CELL_MASS_SNAPSHOT_KEY) {
+      if (message?.source === STORAGE_BRIDGE_SOURCE
+        && (message.key === CELL_MASS_SNAPSHOT_KEY || Object.values(FRIEND_MINIMAP_KEYS).includes(message.key))) {
         refresh();
       }
     });
+  }
+
+  function readFriendMinimapRuntimeSettings() {
+    const color = String(getSharedValue(FRIEND_MINIMAP_KEYS.color) || '');
+    const inGameColor = String(getSharedValue(FRIEND_MINIMAP_KEYS.inGameColor) || '');
+    return {
+      friendMinimapName: readBooleanValue(getSharedValue(FRIEND_MINIMAP_KEYS.enabled), true),
+      friendMinimapColor: /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : '#ffffff',
+      friendMinimapMode: getSharedValue(FRIEND_MINIMAP_KEYS.mode) === 'bracket' ? 'bracket' : 'normal',
+      friendMinimapNameMode: getSharedValue(FRIEND_MINIMAP_KEYS.nameMode) === 'onlyProfile' ? 'onlyProfile' : 'both',
+      friendMinimapInGameColor: /^#[0-9a-f]{6}$/i.test(inGameColor) ? inGameColor.toLowerCase() : '#ffffff',
+    };
   }
 
   function installGameBackgroundRuntime() {
@@ -13942,12 +15288,14 @@
     if (typeof GM_addValueChangeListener === 'function') {
       try {
         GM_addValueChangeListener(CELL_RING_SNAPSHOT_KEY, refresh);
+        GM_addValueChangeListener(CELL_BORDER_SYNC_KEY, refresh);
       } catch {}
     }
 
     window.addEventListener?.('message', (event) => {
       const message = event.data;
-      if (message?.source === STORAGE_BRIDGE_SOURCE && message.key === CELL_RING_SNAPSHOT_KEY) {
+      if (message?.source === STORAGE_BRIDGE_SOURCE
+          && (message.key === CELL_RING_SNAPSHOT_KEY || message.key === CELL_BORDER_SYNC_KEY)) {
         refresh();
       }
     });
@@ -14039,9 +15387,6 @@
       run();
     } catch (error) {
       if (error?.name === 'EvalError' && runBundleWithScriptElement(source, probeId)) {
-        if (isBundleExecutionProbeSet(probeId)) {
-          return;
-        }
         return;
       }
       logError('Failed to run extension bundle.', error);
@@ -14108,6 +15453,7 @@
   installSharedStorageBridge();
   migrateLegacySettingsCookies(document, { getItem: getSharedValue, setItem: setSharedValue });
   installClanTextRuntimeRefresh();
+  installLiquidJellyRuntime();
   installCellRingRuntime();
   installFpsSaverRuntime();
   installEmoteSkinRuntime();

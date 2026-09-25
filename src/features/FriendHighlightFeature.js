@@ -72,15 +72,24 @@ export class FriendHighlightFeature {
     }
 
     this.observer = new MutationObserver((mutations) => {
+      const chat = this.document.querySelector?.('#chat');
+      if (!chat) {
+        return;
+      }
       for (const mutation of mutations) {
-        if (mutation.type === 'childList' && (mutation.addedNodes.length || mutation.removedNodes.length)) {
+        if (chat.contains(mutation.target)) {
           this.scheduleUpdate();
           return;
         }
 
-        if (mutation.type === 'attributes' && UID_ATTRS.includes(mutation.attributeName)) {
-          this.scheduleUpdate();
-          return;
+        // A newly inserted chat (or its ancestor) needs an initial styling pass.
+        if (mutation.type === 'childList') {
+          for (const node of mutation.addedNodes) {
+            if (node.contains?.(chat)) {
+              this.scheduleUpdate();
+              return;
+            }
+          }
         }
       }
     });

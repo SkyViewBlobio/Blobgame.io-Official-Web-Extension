@@ -1,3 +1,5 @@
+import { readBooleanSetting } from '../storage/readBooleanSetting.js';
+
 export const JELLY_SHADER_KEYS = {
   enabled: 'blobio.settings.jellyShader.enabled',
   skinCells: 'blobio.settings.jellyShader.skinCells',
@@ -10,18 +12,6 @@ export const DEFAULT_JELLY_SHADER_SETTINGS = Object.freeze({
   noSkinCells: false,
 });
 
-function readBoolean(storage, key, fallback) {
-  try {
-    const value = storage?.getItem?.(key);
-    if (value === null || value === undefined || value === '') {
-      return fallback;
-    }
-    return value === '1' || String(value).toLowerCase() === 'true';
-  } catch {
-    return fallback;
-  }
-}
-
 export function normalizeJellyShaderSettings(settings = {}) {
   const source = settings && typeof settings === 'object' ? settings : {};
   return {
@@ -33,9 +23,9 @@ export function normalizeJellyShaderSettings(settings = {}) {
 
 export function readJellyShaderSettings(storage) {
   return normalizeJellyShaderSettings({
-    enabled: readBoolean(storage, JELLY_SHADER_KEYS.enabled, DEFAULT_JELLY_SHADER_SETTINGS.enabled),
-    skinCells: readBoolean(storage, JELLY_SHADER_KEYS.skinCells, DEFAULT_JELLY_SHADER_SETTINGS.skinCells),
-    noSkinCells: readBoolean(storage, JELLY_SHADER_KEYS.noSkinCells, DEFAULT_JELLY_SHADER_SETTINGS.noSkinCells),
+    enabled: readBooleanSetting(storage, JELLY_SHADER_KEYS.enabled, DEFAULT_JELLY_SHADER_SETTINGS.enabled),
+    skinCells: readBooleanSetting(storage, JELLY_SHADER_KEYS.skinCells, DEFAULT_JELLY_SHADER_SETTINGS.skinCells),
+    noSkinCells: readBooleanSetting(storage, JELLY_SHADER_KEYS.noSkinCells, DEFAULT_JELLY_SHADER_SETTINGS.noSkinCells),
   });
 }
 

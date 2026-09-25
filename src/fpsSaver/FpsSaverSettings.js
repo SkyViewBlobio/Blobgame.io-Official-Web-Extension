@@ -109,10 +109,15 @@ function clampInteger(value, min, max, fallback) {
   return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
 }
 
-function chooseNewestSnapshot(...snapshots) {
-  return snapshots
-    .filter(Boolean)
-    .sort((left, right) => normalizeUpdatedAt(right.updatedAt) - normalizeUpdatedAt(left.updatedAt))[0] || null;
+function chooseNewestSnapshot(storedSnapshot, cookieSnapshot) {
+  if (!storedSnapshot) {
+    return cookieSnapshot;
+  }
+  if (!cookieSnapshot) {
+    return storedSnapshot;
+  }
+  return normalizeUpdatedAt(cookieSnapshot.updatedAt) > normalizeUpdatedAt(storedSnapshot.updatedAt)
+    ? cookieSnapshot : storedSnapshot;
 }
 
 function normalizeUpdatedAt(value) {

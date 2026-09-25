@@ -1,6 +1,6 @@
 export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalThis) {
   const win = pageWindow || globalThis;
-  const SCRIPT_VERSION = '0.1.40';
+  const SCRIPT_VERSION = '0.1.44';
   const host = String(win.location?.hostname || '').toLowerCase();
   if (host && host !== 'custom.client.blobgame.io' && host !== 'blobgame.io') {
     return false;
@@ -8,6 +8,16 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
 
   if (win.__blobioCellMassInstalled && !needsRuntimeUpgrade()) {
     win.__blobioCellMassRefresh?.(initialSettings);
+    if (!win.__blobioCellMassState?.friendMinimapCentered) {
+      const doc = win.document;
+      const style = doc?.createElement?.('style');
+      if (style) {
+        style.id = 'blobio-friend-minimap-center-compat';
+        style.textContent = '.blobio-friend-minimap-label{text-align:center}';
+        (doc.head || doc.documentElement)?.appendChild?.(style);
+        win.__blobioCellMassState.friendMinimapCentered = true;
+      }
+    }
     return true;
   }
 
@@ -17,6 +27,8 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
   const PATCH_MARKER = 'BlobioCellMassDraw';
   const CLAN_TAG_OVERLAY_CLASS = 'blobio-cell-clan-tag-overlay';
   const CLAN_TAG_OVERLAY_STYLE_ID = 'blobio-cell-clan-tag-overlay-style';
+  const FRIEND_MINIMAP_OVERLAY_CLASS = 'blobio-friend-minimap-overlay';
+  const FRIEND_MINIMAP_STYLE_ID = 'blobio-friend-minimap-style';
   const GAME_CANVAS_CLASS = 'blobio-background-game-canvas';
   const IGNORED_CANVAS_CLASSES = new Set([
     CLAN_TAG_OVERLAY_CLASS,
@@ -47,7 +59,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
   const MASS_DEBUG_SAMPLE_INTERVAL = 64;
   const CLAN_DEBUG_SAMPLE_INTERVAL = 64;
   const PLAYER_UID_MAP_REFRESH_MS = 1000;
-  const PLAYER_UID_MAP_MAX_ROWS = 80;
+  const PLAYER_UID_CACHE_LIMIT = 2048;
   const CONTEXT_MENU_UID_HOOK_RETRY_MS = 250;
   const CONTEXT_MENU_UID_HOOK_TIMEOUT_MS = 30000;
   const UID_LOOKUP_PACKET = 65;
@@ -57,6 +69,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
   const UID_LOOKUP_MAX_QUEUE = 64;
   const HUD_SOCKET_HOOK_RETRY_MS = 250;
   const HUD_SOCKET_HOOK_TIMEOUT_MS = 30000;
+  const FRIEND_MINIMAP_STALE_MS = 1200;
 
   let settings = normalizeSettings(initialSettings);
   let clanTagState = createEmptyClanTagState();
@@ -82,6 +95,23 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     staleClearDeadline: 0,
     hasVisibleContent: false,
   };
+  const friendMinimap = {
+    active: false,
+    overlay: null,
+    style: null,
+    canvas: null,
+    geometry: null,
+    labels: new Map(),
+    pending: new Map(),
+    frameId: 0,
+    captureFrameId: -1,
+    flushScheduled: false,
+    staleTimer: 0,
+    lastFrameAt: 0,
+    resizeHandler: null,
+    pageHideHandler: null,
+    visibilityHandler: null,
+  };
 
   const labelCache = new Map();
   const clanCellCache = new Map();
@@ -92,9 +122,11 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
   const uidResponseOrigins = [];
   const seenClanPlayerIds = new Map();
   const messageHookedSockets = new WeakSet();
+  const retiredSockets = new WeakSet();
   const state = {
     installed: true,
     version: SCRIPT_VERSION,
+    friendMinimapCentered: true,
     startedAt: Date.now(),
     settings,
     seenCacheScripts: 0,
@@ -147,6 +179,11 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       clanOverlayStaleClears: 0,
       clanOverlaySkipped: 0,
       clanOverlayCleanups: 0,
+      friendMinimapFrames: 0,
+      friendMinimapCaptures: 0,
+      friendMinimapLabels: 0,
+      friendMinimapFlushes: 0,
+      friendMinimapClears: 0,
       clanSeenDetailSamples: 0,
       clanSeenDetailSkips: 0,
       clanRecentCellDiagnosticCalls: 0,
@@ -178,6 +215,9 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
   win.__blobioCellClanTagRefresh = refreshClanTagState;
   win.__blobioCellClanTagBeginFrame = safeBeginClanTagOverlayFrame;
   win.__blobioCellClanTagRender = safeRenderCellClanTagOverlay;
+  win.__blobioFriendMinimapBeginFrame = safeBeginFriendMinimapFrame;
+  win.__blobioFriendMinimapCapture = safeCaptureFriendMinimap;
+  win.__blobioFriendMinimapDestroy = destroyFriendMinimap;
   win.__blobioCellClanUidResponse = handleSocketUidResponse;
   win.__BlobioCellMassDebug = debugReport;
   win.BlobioCellMassDebug = debugReport;
@@ -212,6 +252,15 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       refreshPlayerUidMapIfNeeded,
       refreshSettings,
       renderCellClanTagOverlay,
+      rememberPlayerUid,
+      rememberActiveGameSocket,
+      playerUidState,
+      friendMinimap,
+      beginFriendMinimapFrame,
+      captureFriendMinimap,
+      flushFriendMinimap,
+      destroyFriendMinimap,
+      patchFriendMinimapHooks,
     };
   }
 
@@ -222,6 +271,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
   adoptClanUidSocketBridge();
   installPlayerUidSocketProbe();
   installHudSocketCallbackProbeWithRetry();
+  installFriendMinimap();
   installGameScriptPatch();
   return true;
 
@@ -281,6 +331,12 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       ...(nextSettings || {}),
     });
     state.settings = settings;
+    if (!friendMinimap.active) {
+      installFriendMinimap();
+    }
+    if (!settings.friendMinimapName) {
+      clearFriendMinimapLabels();
+    }
 
     if (
       previous.compact !== settings.compact
@@ -361,8 +417,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     const result = {
       text,
       scale,
-      dynamic: settings.mode === 'dynamic',
-      offset: settings.yOffset,
+      dynamic: true,
       lineGap: settings.nameGap,
       maxWidth: MAX_LABEL_WIDTH,
       maxHeight: primary ? PRIMARY_MAX_LABEL_HEIGHT : MAX_LABEL_HEIGHT,
@@ -384,6 +439,8 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       || typeof win.__blobioCellClanUidResponse !== 'function'
       || typeof win.__blobioCellClanTagRefresh !== 'function'
       || typeof win.__blobioCellClanTagRender !== 'function'
+      || typeof win.__blobioFriendMinimapBeginFrame !== 'function'
+      || typeof win.__blobioFriendMinimapCapture !== 'function'
       || !win.__blobioCellMassState?.clanTags;
   }
 
@@ -414,6 +471,313 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     }
   }
 
+  function installFriendMinimap() {
+    if (friendMinimap.active) {
+      return;
+    }
+
+    friendMinimap.active = true;
+    const doc = win.document || globalThis.document;
+    friendMinimap.resizeHandler = () => {
+      friendMinimap.geometry = null;
+    };
+    friendMinimap.pageHideHandler = () => clearFriendMinimapLabels();
+    friendMinimap.visibilityHandler = () => {
+      if (doc?.hidden) {
+        clearFriendMinimapLabels();
+      }
+    };
+    win.addEventListener?.('resize', friendMinimap.resizeHandler, { passive: true });
+    win.addEventListener?.('pagehide', friendMinimap.pageHideHandler);
+    doc?.addEventListener?.('visibilitychange', friendMinimap.visibilityHandler);
+  }
+
+  function destroyFriendMinimap() {
+    const doc = win.document || globalThis.document;
+    win.removeEventListener?.('resize', friendMinimap.resizeHandler);
+    win.removeEventListener?.('pagehide', friendMinimap.pageHideHandler);
+    doc?.removeEventListener?.('visibilitychange', friendMinimap.visibilityHandler);
+    if (friendMinimap.staleTimer) {
+      win.clearTimeout?.(friendMinimap.staleTimer);
+    }
+    clearFriendMinimapLabels();
+    friendMinimap.overlay?.remove?.();
+    friendMinimap.style?.remove?.();
+    friendMinimap.active = false;
+    friendMinimap.overlay = null;
+    friendMinimap.style = null;
+    friendMinimap.canvas = null;
+    friendMinimap.geometry = null;
+    friendMinimap.pending.clear();
+    friendMinimap.flushScheduled = false;
+    friendMinimap.staleTimer = 0;
+    return true;
+  }
+
+  function safeBeginFriendMinimapFrame(minimap) {
+    try {
+      return beginFriendMinimapFrame(minimap);
+    } catch (error) {
+      rememberError(`Friend minimap begin-frame failed: ${getErrorMessage(error)}`);
+      return false;
+    }
+  }
+
+  function safeCaptureFriendMinimap(...args) {
+    try {
+      return captureFriendMinimap(...args);
+    } catch (error) {
+      rememberError(`Friend minimap capture failed: ${getErrorMessage(error)}`);
+      return false;
+    }
+  }
+
+  function beginFriendMinimapFrame(minimap) {
+    win.__blobioMinimapVisibility?.(minimap);
+    if (!friendMinimap.active || !settings.friendMinimapName) {
+      return false;
+    }
+
+    friendMinimap.frameId += 1;
+    friendMinimap.captureFrameId = -1;
+    friendMinimap.pending.clear();
+    friendMinimap.lastFrameAt = Date.now();
+    state.counters.friendMinimapFrames += 1;
+    scheduleFriendMinimapFlush(friendMinimap.frameId);
+    scheduleFriendMinimapStaleClear();
+    return true;
+  }
+
+  function captureFriendMinimap(minimap, gameState, getProfileName, isFriend, nativeFriendsEnabled, getCell, x, y, playing) {
+    if (x !== undefined) win.__blobioMinimapCapture?.(minimap, gameState, x, y, playing, nativeFriendsEnabled);
+    if (!friendMinimap.active || !settings.friendMinimapName || !nativeFriendsEnabled || !minimap?.i) {
+      return false;
+    }
+
+    const viewportWidth = Number(minimap.s?.C) || 0;
+    const viewportHeight = Number(minimap.s?.r) || 0;
+    const scale = Number(minimap.k) || 0;
+    const mapSize = Number(minimap.n) || 0;
+    const worldMinimum = Number(gameState?.t?.c);
+    if (!viewportWidth || !viewportHeight || !scale || !mapSize || !Number.isFinite(worldMinimum)) {
+      return false;
+    }
+
+    for (const dot of minimap.r?.a || []) {
+      if (!dot || !isFriend?.(gameState.f, dot.a)) {
+        continue;
+      }
+      const profileName = String(getProfileName?.(gameState.f, dot.a) || '').trim();
+      if (!profileName) {
+        continue;
+      }
+      let inGameName = '';
+      if (settings.friendMinimapNameMode === 'both') {
+        inGameName = String(getCell?.(gameState.w, dot.f) || '').trim();
+      }
+      const bracket = settings.friendMinimapMode === 'bracket';
+      friendMinimap.pending.set(String(dot.a), {
+        profileText: bracket ? `[${profileName}]` : profileName,
+        inGameText: inGameName ? (bracket ? `[${inGameName}]` : inGameName) : '',
+        profileColor: settings.friendMinimapColor,
+        inGameColor: settings.friendMinimapInGameColor,
+        x: viewportWidth - mapSize - 10 + (Number(dot.d) - worldMinimum) * scale,
+        y: viewportHeight - 10 - (-Number(dot.e) - worldMinimum) * scale,
+        radius: Math.max(0, (Number(minimap.f) || 0) * scale),
+        viewportWidth,
+        viewportHeight,
+      });
+    }
+
+    friendMinimap.captureFrameId = friendMinimap.frameId;
+    state.counters.friendMinimapCaptures += 1;
+    return true;
+  }
+
+  function scheduleFriendMinimapFlush(frameId) {
+    if (friendMinimap.flushScheduled) {
+      return;
+    }
+    friendMinimap.flushScheduled = true;
+    const flush = () => {
+      friendMinimap.flushScheduled = false;
+      flushFriendMinimap(frameId);
+    };
+    if (typeof win.queueMicrotask === 'function') {
+      win.queueMicrotask(flush);
+    } else {
+      Promise.resolve().then(flush);
+    }
+  }
+
+  function scheduleFriendMinimapStaleClear() {
+    if (friendMinimap.staleTimer || typeof win.setTimeout !== 'function') {
+      return;
+    }
+    const clearIfStale = () => {
+      friendMinimap.staleTimer = 0;
+      if (!friendMinimap.active) {
+        return;
+      }
+      const remaining = FRIEND_MINIMAP_STALE_MS - (Date.now() - friendMinimap.lastFrameAt);
+      if (remaining > 0) {
+        friendMinimap.staleTimer = win.setTimeout(clearIfStale, remaining);
+        return;
+      }
+      clearFriendMinimapLabels();
+    };
+    friendMinimap.staleTimer = win.setTimeout(clearIfStale, FRIEND_MINIMAP_STALE_MS);
+  }
+
+  function flushFriendMinimap(frameId = friendMinimap.frameId) {
+    state.counters.friendMinimapFlushes += 1;
+    if (!friendMinimap.active
+      || frameId !== friendMinimap.frameId
+      || friendMinimap.captureFrameId !== frameId
+      || !settings.friendMinimapName) {
+      clearFriendMinimapLabels();
+      return false;
+    }
+
+    const geometry = getFriendMinimapGeometry();
+    const overlay = ensureFriendMinimapOverlay(geometry);
+    if (!geometry || !overlay) {
+      clearFriendMinimapLabels();
+      return false;
+    }
+
+    const visible = new Set();
+    for (const [uid, item] of friendMinimap.pending) {
+      visible.add(uid);
+      let entry = friendMinimap.labels.get(uid);
+      if (!entry) {
+        const node = overlay.ownerDocument.createElement('span');
+        node.className = 'blobio-friend-minimap-label';
+        const profile = overlay.ownerDocument.createElement('span');
+        const inGame = overlay.ownerDocument.createElement('span');
+        node.append(profile, inGame);
+        overlay.appendChild(node);
+        entry = { node, profile, inGame, profileText: '', inGameText: '', profileColor: '', inGameColor: '', width: 0, height: 0 };
+        friendMinimap.labels.set(uid, entry);
+      }
+      if (entry.profileText !== item.profileText || entry.inGameText !== item.inGameText) {
+        entry.profile.textContent = item.profileText;
+        entry.inGame.textContent = item.inGameText;
+        entry.inGame.style.display = item.inGameText ? '' : 'none';
+        entry.profileText = item.profileText;
+        entry.inGameText = item.inGameText;
+        const bounds = entry.node.getBoundingClientRect?.();
+        entry.width = Number(bounds?.width) || Math.min(220, Math.max(item.profileText.length, item.inGameText.length) * 7);
+        entry.height = Number(bounds?.height) || (item.inGameText ? 30 : 15);
+      }
+      if (entry.profileColor !== item.profileColor) {
+        entry.profile.style.color = item.profileColor;
+        entry.profileColor = item.profileColor;
+      }
+      if (entry.inGameColor !== item.inGameColor) {
+        entry.inGame.style.color = item.inGameColor;
+        entry.inGameColor = item.inGameColor;
+      }
+
+      const scaleX = geometry.width / item.viewportWidth;
+      const scaleY = geometry.height / item.viewportHeight;
+      const screenX = geometry.left + item.x * scaleX;
+      const screenBottom = geometry.top + (item.y - item.radius) * scaleY - 3;
+      const halfWidth = Math.min(entry.width / 2, geometry.width / 2);
+      const windowWidth = Number(win.innerWidth) || geometry.left + geometry.width;
+      const windowHeight = Number(win.innerHeight) || geometry.top + geometry.height;
+      const clampedX = Math.max(halfWidth, Math.min(windowWidth - halfWidth, screenX));
+      const clampedBottom = Math.max(entry.height, Math.min(windowHeight, screenBottom));
+      entry.node.style.left = `${Math.round(clampedX - geometry.left)}px`;
+      entry.node.style.top = `${Math.round(clampedBottom - geometry.top)}px`;
+    }
+
+    for (const [uid, entry] of friendMinimap.labels) {
+      if (!visible.has(uid)) {
+        entry.node.remove?.();
+        friendMinimap.labels.delete(uid);
+      }
+    }
+    state.counters.friendMinimapLabels = friendMinimap.labels.size;
+    return true;
+  }
+
+  function getFriendMinimapGeometry() {
+    const canvas = friendMinimap.canvas?.isConnected
+      ? friendMinimap.canvas
+      : findClanTagTargetCanvas(Date.now());
+    if (!canvas) {
+      friendMinimap.canvas = null;
+      friendMinimap.geometry = null;
+      return null;
+    }
+    if (canvas !== friendMinimap.canvas) {
+      friendMinimap.canvas = canvas;
+      friendMinimap.geometry = null;
+    }
+    if (!friendMinimap.geometry) {
+      const rect = canvas.getBoundingClientRect?.();
+      const width = Number(rect?.width) || Number(canvas.clientWidth) || 0;
+      const height = Number(rect?.height) || Number(canvas.clientHeight) || 0;
+      if (!width || !height) {
+        return null;
+      }
+      friendMinimap.geometry = {
+        left: Number(rect?.left) || 0,
+        top: Number(rect?.top) || 0,
+        width,
+        height,
+      };
+    }
+    return friendMinimap.geometry;
+  }
+
+  function ensureFriendMinimapOverlay(geometry) {
+    const doc = win.document || globalThis.document;
+    if (!doc?.createElement || !geometry) {
+      return null;
+    }
+    if (!friendMinimap.style?.isConnected) {
+      const style = doc.createElement('style');
+      style.id = FRIEND_MINIMAP_STYLE_ID;
+      style.textContent = `
+.${FRIEND_MINIMAP_OVERLAY_CLASS}{position:fixed;z-index:1;pointer-events:none;overflow:visible;contain:layout style paint}
+.blobio-friend-minimap-label{position:absolute;display:block;max-width:220px;transform:translate(-50%,-100%);text-align:center;font:700 12px/1.2 "Blobio Flags",Ubuntu,"Segoe UI",Arial,"Segoe UI Emoji",sans-serif;text-shadow:-1px -1px 1px #000,1px -1px 1px #000,-1px 1px 1px #000,1px 1px 1px #000,0 0 4px #000}
+.blobio-friend-minimap-label span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+`;
+      (doc.head || doc.documentElement)?.appendChild?.(style);
+      friendMinimap.style = style;
+    }
+    if (!friendMinimap.overlay?.isConnected) {
+      for (const stale of doc.querySelectorAll?.(`.${FRIEND_MINIMAP_OVERLAY_CLASS}`) || []) {
+        stale.remove?.();
+      }
+      const overlay = doc.createElement('div');
+      overlay.className = FRIEND_MINIMAP_OVERLAY_CLASS;
+      overlay.setAttribute('aria-hidden', 'true');
+      (doc.body || doc.documentElement)?.appendChild?.(overlay);
+      friendMinimap.overlay = overlay;
+    }
+    const overlay = friendMinimap.overlay;
+    overlay.style.left = `${geometry.left}px`;
+    overlay.style.top = `${geometry.top}px`;
+    overlay.style.width = `${geometry.width}px`;
+    overlay.style.height = `${geometry.height}px`;
+    return overlay;
+  }
+
+  function clearFriendMinimapLabels() {
+    if (friendMinimap.labels.size > 0) {
+      state.counters.friendMinimapClears += 1;
+    }
+    for (const entry of friendMinimap.labels.values()) {
+      entry.node.remove?.();
+    }
+    friendMinimap.labels.clear();
+    friendMinimap.pending.clear();
+    state.counters.friendMinimapLabels = 0;
+  }
+
   function drawCellClanTagLabel(
     playerId,
     cellId,
@@ -428,13 +792,11 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     loweredRankName = false,
   ) {
     state.counters.clanHookCalls += 1;
-    rememberSeenClanPlayerId(playerId, name, cellId);
-
     if (!clanTagState.settings.enabled || !clanTagState.settings.showCellTags) {
       state.counters.clanHiddenBySetting += 1;
-      rememberClanCellSample('hidden-setting', playerId, cellId, mass, renderSize, name, nameDrawn);
       return null;
     }
+    rememberSeenClanPlayerId(playerId, name, cellId);
 
     const safeMass = Math.max(0, Number(mass) || 0);
     const safeRenderSize = Number(renderSize) || Number(rawSize) || 0;
@@ -481,7 +843,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       priority: getClanCellMetric(safeMass, safeRenderSize),
       gap: Math.max(3, Math.min(12, safeRenderSize * 0.04)),
       maxWidth: CLAN_TAG_MAX_WIDTH,
-      position: settings.mode === 'vip' || (settings.mode === 'dynamic' && loweredRankName) ? 'below' : 'above',
+      position: loweredRankName ? 'below' : 'above',
       downwardOffsetRatio: shortName ? CLAN_TAG_SHORT_NAME_DOWNWARD_OFFSET : 0,
       bold: true,
       color: { ...CLAN_TAG_COLOR },
@@ -1213,12 +1575,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     playerUidState.refreshedAt = now;
     playerUidState.refreshes += 1;
 
-    try {
-      playerUidState.lastError = '';
-    } catch (error) {
-      playerUidState.lastError = getErrorMessage(error);
-      rememberError(`Cell clan tag player UID map failed: ${playerUidState.lastError}`);
-    }
+    playerUidState.lastError = '';
 
     state.counters.clanUidMapRefreshes += 1;
     state.playerUidMap = describePlayerUidState();
@@ -1287,7 +1644,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       rememberActiveGameSocket(this, 'socket-send');
       const result = previousSend.apply(this, arguments);
       const manualPlayerId = readUidLookupRequestPlayerId(data);
-      if (manualPlayerId) {
+      if (manualPlayerId && this === activeGameSocket) {
         rememberUidResponseOrigin('manual', manualPlayerId);
       }
       return result;
@@ -1315,7 +1672,6 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     try {
       const WrappedWebSocket = function BlobioTrackedWebSocket(...args) {
         const socket = new WebSocketCtor(...args);
-        rememberActiveGameSocket(socket, 'socket-constructor');
         return socket;
       };
 
@@ -1374,7 +1730,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     const previous = original.__blobioCellClanUidSocketCallbackOriginal || original;
     const wrapped = function blobioCellClanUidSocketCallback(socket, event) {
       rememberActiveGameSocket(socket, source);
-      if (source === 'hud-message' && consumeSocketUidResponseEvent(event)) {
+      if (source === 'hud-message' && consumeSocketUidResponseEvent(event, socket)) {
         return true;
       }
       return previous.apply(this, arguments);
@@ -1386,11 +1742,20 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
   }
 
   function rememberActiveGameSocket(socket, source = 'socket-hook') {
-    if (!socket || typeof socket !== 'object') {
+    if (!socket || typeof socket !== 'object' || retiredSockets.has(socket) || socket.readyState > 1) {
       return;
     }
 
+    // Constructor-only sockets include HUD ping probes. Adopt a connection on game activity.
+    if (socket !== activeGameSocket && activeGameSocket && isSocketOpen(activeGameSocket)
+      && !source.startsWith('hud-')) {
+      return;
+    }
     const changed = activeGameSocket !== socket || !playerUidState.socketFound;
+    if (activeGameSocket !== socket) {
+      if (activeGameSocket) retiredSockets.add(activeGameSocket);
+      resetPlayerUidSession();
+    }
     activeGameSocket = socket;
     playerUidState.socketFound = true;
     playerUidState.lastSocketSource = source;
@@ -1402,6 +1767,32 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     flushUidLookupQueue(Date.now());
   }
 
+  function resetPlayerUidSession() {
+    playerUidState.playerIdToUid.clear();
+    playerUidState.playerIdSources.clear();
+    playerUidState.nameToUid.clear();
+    playerUidState.sources.clear();
+    playerUidState.ambiguousNames.clear();
+    playerUidState.lastContextMenu = null;
+    playerUidState.lastMatch = null;
+    queuedUidLookups.clear();
+    pendingUidLookups.clear();
+    uidLookupCooldowns.clear();
+    uidLookupQueue.length = 0;
+    uidResponseOrigins.length = 0;
+    nextUidLookupAt = 0;
+    seenClanPlayerIds.clear();
+    clanCellCache.clear();
+    clanOverlay.pending.clear();
+    clanOverlay.selectedCells.clear();
+    clearClanTagOverlayCanvas();
+    clanOverlay.hasVisibleContent = false;
+    if (clanOverlay.staleClearTimer) win.clearTimeout?.(clanOverlay.staleClearTimer);
+    clanOverlay.staleClearTimer = 0;
+    clanOverlay.staleClearDeadline = 0;
+    state.recentClanCells.length = 0;
+  }
+
   function installSocketSendUidHook(socket) {
     if (typeof socket.send !== 'function' || socket.send.__blobioClanUidSocketPatchVersion === SCRIPT_VERSION) {
       return;
@@ -1411,7 +1802,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     const wrapped = function blobioClanUidGameSocketSend(data) {
       const result = previous.apply(this, arguments);
       const playerId = readUidLookupRequestPlayerId(data);
-      if (playerId) {
+      if (playerId && socket === activeGameSocket) {
         rememberUidResponseOrigin('manual', playerId);
       }
       return result;
@@ -1535,7 +1926,9 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
         state.counters.clanUidLookupSentBySocket += 1;
         return true;
       } catch (error) {
+        if (activeGameSocket) retiredSockets.add(activeGameSocket);
         activeGameSocket = null;
+        resetPlayerUidSession();
         playerUidState.socketFound = false;
         playerUidState.lastError = getErrorMessage(error);
         rememberError(`Cell clan tag UID lookup failed: ${playerUidState.lastError}`);
@@ -1700,6 +2093,14 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     if (typeof socket.addEventListener === 'function' && !messageHookedSockets.has(socket)) {
       try {
         socket.addEventListener('message', handleSocketMessageEvent, true);
+        socket.addEventListener('close', () => {
+          if (socket !== activeGameSocket) return;
+          retiredSockets.add(socket);
+          activeGameSocket = null;
+          resetPlayerUidSession();
+          playerUidState.socketFound = false;
+          state.playerUidMap = describePlayerUidState();
+        }, { once: true });
         messageHookedSockets.add(socket);
         installed = true;
       } catch (error) {
@@ -1727,7 +2128,7 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
 
     const previous = original.__blobioCellClanUidMessageOriginal || original;
     const wrapped = function blobioCellClanUidSocketMessage(event) {
-      if (consumeSocketUidResponseEvent(event)) {
+      if (consumeSocketUidResponseEvent(event, socket)) {
         return undefined;
       }
       return previous.apply(this, arguments);
@@ -1746,12 +2147,14 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
   }
 
   function handleSocketMessageEvent(event) {
-    consumeSocketUidResponseEvent(event);
+    consumeSocketUidResponseEvent(event, event.currentTarget);
   }
 
-  function consumeSocketUidResponseEvent(event) {
+  function consumeSocketUidResponseEvent(event, socket) {
+    if (socket !== activeGameSocket && !retiredSockets.has(socket)) return false;
     const uid = readUidLookupResponseMessage(event?.data);
-    if (!uid || !handleSocketUidResponse(uid)) {
+    // Retired replies must not reach the game's context menu and repopulate the new session.
+    if (!uid || (socket === activeGameSocket && !handleSocketUidResponse(uid))) {
       return false;
     }
 
@@ -1805,47 +2208,6 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
   function isSocketOpen(socket) {
     const openValue = Number(win.WebSocket?.OPEN ?? 1);
     return Number(socket?.readyState) === openValue;
-  }
-
-  function collectMouseMenuUidRow(next) {
-    const doc = win.document || globalThis.document;
-    const playerName = doc?.querySelector?.('#mouseMenu #playerName[uid], #playerName[uid]');
-    const uid = normalizeUid(playerName?.getAttribute?.('uid'));
-    if (!uid) {
-      return;
-    }
-
-    rememberPlayerNameUid(next, playerName.getAttribute?.('title') || playerName.textContent, uid, 'mouse-menu-dom');
-  }
-
-  function collectLeaderboardUidRows(next) {
-    const doc = win.document || globalThis.document;
-    const rows = Array.from(doc?.querySelectorAll?.('#leader-board li[uid]') || [])
-      .slice(0, PLAYER_UID_MAP_MAX_ROWS);
-
-    for (const row of rows) {
-      const uid = normalizeUid(row.getAttribute?.('uid'));
-      if (!uid) {
-        continue;
-      }
-
-      rememberPlayerNameUid(next, stripLeaderboardRank(row.textContent), uid, 'leaderboard');
-    }
-  }
-
-  function collectChatUidRows(next) {
-    const doc = win.document || globalThis.document;
-    const rows = Array.from(doc?.querySelectorAll?.('#chat li[uid]') || [])
-      .slice(-PLAYER_UID_MAP_MAX_ROWS);
-
-    for (const row of rows) {
-      const uid = normalizeUid(row.getAttribute?.('uid'));
-      if (!uid) {
-        continue;
-      }
-
-      rememberPlayerNameUid(next, readChatPlayerName(row), uid, 'chat');
-    }
   }
 
   function installContextMenuUidHook() {
@@ -1913,6 +2275,11 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     if (normalizedPlayerId) {
       playerUidState.playerIdToUid.set(normalizedPlayerId, uid);
       playerUidState.playerIdSources.set(normalizedPlayerId, source);
+      if (playerUidState.playerIdToUid.size > PLAYER_UID_CACHE_LIMIT) {
+        const oldest = playerUidState.playerIdToUid.keys().next().value;
+        playerUidState.playerIdToUid.delete(oldest);
+        playerUidState.playerIdSources.delete(oldest);
+      }
     }
 
     rememberPlayerNameUid(playerUidState, playerName, uid, source);
@@ -1936,28 +2303,21 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
     const existing = next.nameToUid.get(normalizedName);
     if (existing && existing !== uid) {
       next.nameToUid.delete(normalizedName);
+      next.sources.delete(normalizedName);
       next.ambiguousNames.add(normalizedName);
+      if (next.ambiguousNames.size > PLAYER_UID_CACHE_LIMIT) {
+        next.ambiguousNames.delete(next.ambiguousNames.values().next().value);
+      }
       return;
     }
 
     next.nameToUid.set(normalizedName, uid);
     next.sources.set(normalizedName, source);
-  }
-
-  function stripLeaderboardRank(value) {
-    return String(value || '').replace(/^\s*\d+\.\s*/, '');
-  }
-
-  function readChatPlayerName(row) {
-    const firstSpan = Array.from(row?.children || [])
-      .find((child) => String(child?.tagName || '').toUpperCase() === 'SPAN');
-    if (firstSpan) {
-      return firstSpan.textContent;
+    if (next.nameToUid.size > PLAYER_UID_CACHE_LIMIT) {
+      const oldest = next.nameToUid.keys().next().value;
+      next.nameToUid.delete(oldest);
+      next.sources.delete(oldest);
     }
-
-    const text = String(row?.textContent || '');
-    const colonIndex = text.indexOf(':');
-    return colonIndex >= 0 ? text.slice(0, colonIndex) : text;
   }
 
   function normalizePlayerName(value) {
@@ -2106,7 +2466,6 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       mass: Math.round(mass * 10) / 10,
       text: result.text,
       scale: roundNumber(result.scale),
-      offset: roundNumber(result.offset),
       primary: Boolean(result.primary),
       cached: Boolean(result.cached),
     };
@@ -2466,6 +2825,12 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       result.changed = true;
       result.reason = 'patched-unicode-names';
     }
+    const friendMinimapPatch = patchFriendMinimapHooks(result.source);
+    if (friendMinimapPatch.changed) {
+      result.source = friendMinimapPatch.source;
+      result.changed = true;
+      result.reason = 'patched-friend-minimap';
+    }
     if (typeof result.source !== 'string' || result.source.includes('__blobioCellMassMeasureName(h,')) {
       return result;
     }
@@ -2504,6 +2869,81 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       'f=a.o.b/(a.i.b.e/a.i.b.A);Nn(a.i.b,f);' +
       '}else{' + original + ';}')
       .replace(color, 'a.i.a.__blobioUnicodeBounds=null;' + color);
+  }
+
+  function patchFriendMinimapHooks(source) {
+    if (typeof source !== 'string') {
+      return { source, changed: false };
+    }
+
+    const beginHook = '$wnd.__blobioFriendMinimapBeginFrame&&$wnd.__blobioFriendMinimapBeginFrame(qxe.v);';
+    const captureHook = ';$wnd.__blobioFriendMinimapCapture&&$wnd.__blobioFriendMinimapCapture(a,qxe,Gye,Lye,Nye(qxe.f,(Ize(),Eze)),E2b,b,c,d);';
+    const insertions = [];
+
+    if (!source.includes(beginHook)) {
+      const renderAnchor = '!!qxe.v&&qre(qxe.v,qxe.c.b,qxe.c.c,!!c);';
+      const renderIndex = uniqueIndexOf(source, renderAnchor);
+      const renderFunction = readFunctionBounds(source, renderIndex);
+      if (!renderFunction) {
+        return { source, changed: false };
+      }
+      insertions.push({ index: renderFunction.bodyStart + 1, text: beginHook });
+    }
+
+    if (!source.includes('__blobioFriendMinimapCapture')) {
+      const friendsAnchor = 'if(Nye(qxe.f,(Ize(),Eze))){VL(a.p,a.d);for(';
+      const friendsIndex = uniqueIndexOf(source, friendsAnchor);
+      const minimapFunction = readFunctionBounds(source, friendsIndex);
+      if (!minimapFunction) {
+        return { source, changed: false };
+      }
+      insertions.push({ index: minimapFunction.end, text: captureHook });
+      const draws = [
+        'dt(a.a,a.q,Jse?0:100*a.k,a.s.r-a.n,a.n+5,a.n)',
+        'dt(a.a,a.q,a.s.C-a.n-10,10,a.n,a.n)',
+        'KL(a.p,b-(sxe(),qxe).t.c,c-qxe.t.c,a.f)',
+        'KL(a.p,f.d-qxe.t.c,-f.e-qxe.t.c,a.f)',
+      ];
+      const positions = draws.map(draw => uniqueIndexOf(source, draw));
+      if (positions.some(index => index <= minimapFunction.bodyStart || index >= minimapFunction.end)) {
+        return { source, changed: false };
+      }
+      positions.forEach((index, i) => {
+        insertions.push({ index, text: 'if(!$wnd.__blobioMinimapHudActive){' });
+        insertions.push({ index: index + draws[i].length, text: '}' });
+      });
+    }
+
+    let patched = source;
+    for (const insertion of insertions.sort((left, right) => right.index - left.index)) {
+      patched = patched.slice(0, insertion.index) + insertion.text + patched.slice(insertion.index);
+    }
+    return { source: patched, changed: patched !== source };
+  }
+
+  function uniqueIndexOf(source, value) {
+    const index = source.indexOf(value);
+    return index >= 0 && source.indexOf(value, index + value.length) < 0 ? index : -1;
+  }
+
+  function readFunctionBounds(source, anchorIndex) {
+    if (anchorIndex < 0) {
+      return null;
+    }
+    const start = source.lastIndexOf('function ', anchorIndex);
+    const bodyStart = source.indexOf('{', start);
+    if (start < 0 || bodyStart < start || bodyStart > anchorIndex) {
+      return null;
+    }
+    let depth = 0;
+    for (let index = bodyStart; index < source.length; index += 1) {
+      if (source[index] === '{') {
+        depth += 1;
+      } else if (source[index] === '}' && --depth === 0) {
+        return { start, bodyStart, end: index };
+      }
+    }
+    return null;
   }
 
   function patchLegacyGameBundle(source) {
@@ -2597,7 +3037,6 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       'b=g.R-a.o.d/2;',
       'c=g.S-a.o.b/2;',
       'd&&(c+=f*h.lineGap+a.o.b*0.55);',
-      'c+=h.offset;',
       'c=$wnd.Math.max(g.S-g.M,c);',
       'c=$wnd.Math.min(g.S+g.M-a.o.b,c);',
       '$wnd.__blobioCellMassCaptureDraw&&$wnd.__blobioCellMassCaptureDraw(g.n,h,a.B,b,c);',
@@ -2973,11 +3412,14 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       compact: true,
       smartRendering: true,
       emphasizeBiggest: true,
-      mode: 'normal',
       textScale: 0.65,
-      yOffset: 10,
-      nameGap: 1.2,
+      nameGap: 0.3,
       updateDelayMs: 3000,
+      friendMinimapName: true,
+      friendMinimapColor: '#ffffff',
+      friendMinimapMode: 'normal',
+      friendMinimapNameMode: 'both',
+      friendMinimapInGameColor: '#ffffff',
     };
 
     return {
@@ -2985,11 +3427,20 @@ export function pageCellMassBootstrap(initialSettings = {}, pageWindow = globalT
       compact: source.compact === undefined ? defaults.compact : Boolean(source.compact),
       smartRendering: source.smartRendering === undefined ? defaults.smartRendering : Boolean(source.smartRendering),
       emphasizeBiggest: source.emphasizeBiggest === undefined ? defaults.emphasizeBiggest : Boolean(source.emphasizeBiggest),
-      mode: ['normal', 'vip', 'custom', 'dynamic'].includes(source.mode) ? source.mode : defaults.mode,
       textScale: clampNumber(source.textScale, 0.35, 1.4, defaults.textScale),
-      yOffset: clampNumber(source.yOffset, -120, 120, defaults.yOffset),
       nameGap: clampNumber(source.nameGap, 0.1, 3, defaults.nameGap),
       updateDelayMs: Math.round(clampNumber(source.updateDelayMs, 0, 10000, defaults.updateDelayMs)),
+      friendMinimapName: source.friendMinimapName === undefined
+        ? defaults.friendMinimapName
+        : Boolean(source.friendMinimapName),
+      friendMinimapColor: /^#[0-9a-f]{6}$/i.test(source.friendMinimapColor || '')
+        ? source.friendMinimapColor.toLowerCase()
+        : defaults.friendMinimapColor,
+      friendMinimapMode: source.friendMinimapMode === 'bracket' ? 'bracket' : defaults.friendMinimapMode,
+      friendMinimapNameMode: source.friendMinimapNameMode === 'onlyProfile' ? 'onlyProfile' : defaults.friendMinimapNameMode,
+      friendMinimapInGameColor: /^#[0-9a-f]{6}$/i.test(source.friendMinimapInGameColor || '')
+        ? source.friendMinimapInGameColor.toLowerCase()
+        : defaults.friendMinimapInGameColor,
     };
   }
 

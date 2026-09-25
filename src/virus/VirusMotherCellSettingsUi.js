@@ -1,4 +1,7 @@
+import { createSettingsDrag } from '../ui/SettingsDrag.js';
+import { animateDisclosure } from '../ui/animateDisclosure.js';
 import {
+  normalizeVirusMotherCellSettings,
   readVirusMotherCellSettings,
   saveVirusMotherCellSettings,
 } from './VirusMotherCellSettings.js';
@@ -10,7 +13,6 @@ const MASK_OPTIONS = [
 ];
 const DESCRIPTION = 'FPS-Impact: Medium[20-80]\nReplaces the default virus and mother-cell look with the selected PNG mask.';
 const ROTATE_DESCRIPTION = 'Randomly rotates supported virus PNGs so they look less repeated.';
-const DRAG_SAVE_DELAY_MS = 160;
 
 export class VirusMotherCellSettingsUi {
   constructor({
@@ -32,12 +34,16 @@ export class VirusMotherCellSettingsUi {
     this.hideTooltip = hideTooltip;
     this.onOpen = onOpen;
     this.settings = readVirusMotherCellSettings(storage, document);
+    this.drag = createSettingsDrag(document.defaultView || globalThis,
+      () => {
+        this.sync();
+      },
+      () => { this.settings = saveVirusMotherCellSettings(this.storage, this.settings, this.document); },
+    );
     this.listeners = [];
     this.maskImage = null;
     this.maskImageUrl = '';
     this.elements = null;
-    this.pendingSave = null;
-    this.pendingSaveTimer = 0;
   }
 
   create() {
@@ -73,10 +79,10 @@ export class VirusMotherCellSettingsUi {
   }
 
   destroy() {
+    this.drag.flush();
     for (const [node, type, listener, options] of this.listeners) {
       node.removeEventListener?.(type, listener, options);
     }
-    this.flushPendingSave();
     this.listeners = [];
     this.elements?.group?.remove?.();
     this.elements = null;
@@ -228,7 +234,7 @@ export class VirusMotherCellSettingsUi {
       this.listen(button, 'click', (event) => {
         event.preventDefault?.();
         event.stopPropagation?.();
-        this.flushPendingSave();
+        this.drag.flush();
         this.settings = this.save({ maskId: mask.id });
         this.sync();
       });
@@ -249,18 +255,16 @@ export class VirusMotherCellSettingsUi {
 
     this.listen(colorInput, 'input', () => {
       this.scheduleSave({ color: colorInput.value });
-      this.sync();
     });
-    this.listen(colorInput, 'change', () => this.flushPendingSave());
+    this.listen(colorInput, 'change', () => this.drag.flush());
 
     this.listen(alphaInput, 'input', () => {
       this.scheduleSave({ alpha: alphaInput.value });
-      this.sync();
     });
-    this.listen(alphaInput, 'change', () => this.flushPendingSave());
+    this.listen(alphaInput, 'change', () => this.drag.flush());
 
     this.listen(rotateInput, 'change', () => {
-      this.flushPendingSave();
+      this.drag.flush();
       this.settings = this.save({ rotate: Boolean(rotateInput.checked) });
       this.sync();
     });
@@ -285,7 +289,7 @@ export class VirusMotherCellSettingsUi {
   }
 
   save(changes) {
-    this.clearPendingSaveTimer();
+    this.drag.flush();
     return saveVirusMotherCellSettings(this.storage, {
       ...this.settings,
       ...changes,
@@ -293,46 +297,16 @@ export class VirusMotherCellSettingsUi {
   }
 
   scheduleSave(changes) {
-    this.pendingSave = {
-      ...(this.pendingSave || {}),
-      ...changes,
-    };
-    this.settings = {
-      ...this.settings,
-      ...changes,
-    };
-    this.clearPendingSaveTimer();
-    const setTimeoutRef = this.document.defaultView?.setTimeout || globalThis.setTimeout;
-    this.pendingSaveTimer = setTimeoutRef?.(() => {
-      this.flushPendingSave();
-      this.sync();
-    }, DRAG_SAVE_DELAY_MS) || 0;
-  }
-
-  flushPendingSave() {
-    if (!this.pendingSave) {
-      return;
-    }
-    const changes = this.pendingSave;
-    this.pendingSave = null;
-    this.clearPendingSaveTimer();
-    this.settings = this.save(changes);
-  }
-
-  clearPendingSaveTimer() {
-    if (!this.pendingSaveTimer) {
-      return;
-    }
-    const clearTimeoutRef = this.document.defaultView?.clearTimeout || globalThis.clearTimeout;
-    clearTimeoutRef?.(this.pendingSaveTimer);
-    this.pendingSaveTimer = 0;
+    this.settings = normalizeVirusMotherCellSettings({ ...this.settings, ...changes });
+    this.drag.schedule();
   }
 
   setOpen(open) {
+    if (!open) this.drag.flush();
     if (!this.elements) {
       return;
     }
-    this.elements.menu.hidden = !open;
+    animateDisclosure(this.elements.menu, open);
     this.elements.arrowButton.setAttribute('aria-expanded', String(open));
     this.elements.disclosure.textContent = open ? '-' : '+';
     this.elements.group.classList.toggle('is-open', open);

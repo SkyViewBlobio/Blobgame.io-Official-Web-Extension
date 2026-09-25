@@ -344,19 +344,12 @@ export function pageVirusPelletColorsBootstrap(initialSettings, pageWindow = glo
       return object.K;
     }
 
-    let drawColor = target.solidColor;
-    if (target.gradient) {
-      drawColor = target.gradientScratch;
-      const amount = setGradientGwtColor(drawColor, target.gradientColor, object);
-      recordColorHit(target, object, amount);
-      if (profile) {
-        recordProfileCall(profile, target.hitKey, 'gradient', profileStart);
-      }
-    } else {
-      recordColorHit(target, object, null);
-      if (profile) {
-        recordProfileCall(profile, target.hitKey, 'solid', profileStart);
-      }
+    const gradient = target.gradient;
+    const drawColor = gradient ? target.gradientScratch : target.solidColor;
+    const amount = gradient ? setGradientGwtColor(drawColor, target.gradientColor, object) : null;
+    recordColorHit(target, object, amount);
+    if (profile) {
+      recordProfileCall(profile, target.hitKey, gradient ? 'gradient' : 'solid', profileStart);
     }
 
     return drawColor;

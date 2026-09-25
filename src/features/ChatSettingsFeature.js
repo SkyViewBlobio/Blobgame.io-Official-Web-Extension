@@ -1,6 +1,9 @@
+import { KEYSTROKE_COLORS, normalizeKeystrokeHudSettings, readKeystrokeHudSettings, saveKeystrokeHudSettings } from '../settings/KeystrokeHudSettings.js';
+import { createSettingsDrag } from '../ui/SettingsDrag.js';
 import { CHAT_SETTINGS_CSS, CHAT_SETTINGS_STYLE_ID } from '../css/ChatSettingsStyles.js';
 import { readCellPauseSettings, saveCellPauseSettings } from '../controls/CellPauseSettings.js';
 import { createBlobioStorage } from '../storage/BlobioStorage.js';
+import { loadDailyTasks, formatDailyReset } from './menu/DailyTasks.js';
 import {
   ANIMATION_SPEED_LIMITS,
   ANIMATION_SPEED_MODE_INFO,
@@ -13,21 +16,17 @@ import {
   setChatFontSizeEnabled,
 } from '../settings/RuntimeSettings.js';
 import {
-  HUD_INFO_BOOSTER_COLOR_MODES,
-  HUD_INFO_BOOSTER_DURATION_COLOR_MODES,
-  HUD_INFO_DATA_MODES,
-  HUD_INFO_LAYOUT_MODES,
-  HUD_INFO_POSITION_MODES,
-  HUD_INFO_STYLE_MODES,
-  hudInfoModeLabel,
-  nextHudInfoMode,
   normalizeHudInfoSettings,
   readHudInfoSettings,
   saveHudInfoSettings,
 } from '../settings/HudInfoSettings.js';
 import {
+  CHAT_BLUR_KEY, LEADERBOARD_BLUR_KEY, MINIMAP_BLUR_KEY, MINIMAP_BACKGROUND_KEYS, MINIMAP_OUTLINE_KEYS, MINIMAP_GRID_KEYS, MINIMAP_FONT_KEYS,
+  CHAT_GLOW_KEYS, LEADERBOARD_GLOW_KEYS, MINIMAP_GLOW_KEYS,
+  getBlurSetting, setBlurSetting, normalizeBlurSetting,
   CAPTCHA_LOGO_HIDDEN_KEY,
   CHAT_BACKGROUND_KEYS,
+  CHAT_SLIDER_KEYS,
   CHAT_OUTLINE_KEYS,
   IN_GAME_UI_DEFAULTS,
   KEY_SHORTCUTS_HIDDEN_KEY,
@@ -43,6 +42,7 @@ import {
   setLeaderboardFontSetting,
 } from '../settings/InGameUiSettings.js';
 import {
+  createKeystrokeHudCategory, createMinimapCategory,
   createAnimationSpeedCategory,
   createCaptchaCategory,
   createCategoryButton,
@@ -62,7 +62,6 @@ const MAIN_PANEL_WIDTH = 250;
 const CATEGORY_PANEL_WIDTH = 330;
 const ENABLED_NOTICE = "To mute a person thats logged in, right click on their name in chat, or on their cells/LB name";
 const HOTKEY_CLEAR_HOLD_MS = 3000;
-const HUD_COLOR_COMMIT_DELAY_MS = 180;
 
 export class ChatSettingsFeature {
   constructor({
@@ -71,6 +70,9 @@ export class ChatSettingsFeature {
     mutedPlayersStore = null,
     hotkeyStore = null,
     uiCustomization = null,
+    keystrokeHud = null,
+    minimapAppearance = null,
+    dailyTaskCoin = '',
     logger = console,
   } = {}) {
     this.document = document;
@@ -78,6 +80,9 @@ export class ChatSettingsFeature {
     this.mutedPlayersStore = mutedPlayersStore;
     this.hotkeyStore = hotkeyStore;
     this.uiCustomization = uiCustomization;
+    this.keystrokeHud = keystrokeHud;
+    this.minimapAppearance = minimapAppearance;
+    this.dailyTaskCoin = dailyTaskCoin;
     this.logger = logger;
     this.styleNode = null;
     this.root = null;
@@ -88,6 +93,9 @@ export class ChatSettingsFeature {
     this.viewportHandler = null;
     this.outsidePointerHandler = null;
     this.positionFrame = null;
+    this.dailyTaskNames = null;
+    this.dailyTaskRequest = null;
+    this.dailyTaskTimer = null;
     this.unsubscribeMutedPlayers = null;
     this.unsubscribeHotkeys = null;
     this.selectedMutedUids = new Set();
@@ -107,10 +115,21 @@ export class ChatSettingsFeature {
     this.suppressHotkeyContextMenu = false;
     this.suppressHotkeyBindClickUntil = 0;
     this.keyboardShield = null;
+    this.settingDrags = [];
     this.hudColorDraft = null;
-    this.hudColorPreviewFrame = null;
-    this.hudColorPreviewSettings = null;
-    this.hudColorCommitTimer = null;
+    this.hudDrag = createSettingsDrag(document.defaultView || globalThis, () => {
+      const next = this.hudColorDraft;
+      this.syncColorControls('hud-color', next.color, next.alpha);
+      for (const type of ['merge', 'speed', 'virus']) {
+        const key = `booster${type[0].toUpperCase()}${type.slice(1)}`;
+        this.syncColorControls(`hud-booster-${type}-color`, next[`${key}Color`], next[`${key}Alpha`]);
+      }
+      this.applyHudInfo(next);
+    }, () => {
+      const next = saveHudInfoSettings(this.storage, this.hudColorDraft);
+      this.hudColorDraft = null;
+      this.syncHudInfoSetting(next);
+    });
     this.inlineTooltip = null;
     this.suppressedKeyRelease = null;
     this.started = false;
@@ -122,6 +141,8 @@ export class ChatSettingsFeature {
     }
 
     this.started = true;
+    this.keystrokeEditorHandler = () => this.syncKeystrokeSetting(readKeystrokeHudSettings(this.storage));
+    this.document.defaultView?.addEventListener('blobio-keystroke-editor-change', this.keystrokeEditorHandler);
     this.ensureStyle();
     this.ensureUi();
     this.unsubscribeMutedPlayers = this.mutedPlayersStore?.subscribe?.(() => this.syncMutedPlayersUi()) || null;
@@ -159,6 +180,10 @@ export class ChatSettingsFeature {
       return;
     }
 
+    for (const drag of this.settingDrags) drag.flush();
+    this.settingDrags = [];
+    this.hudDrag.flush();
+    this.stopInGameTasks();
     const root = this.document.createElement('div');
     root.classList.add('blobio-chat-settings-root');
 
@@ -172,6 +197,21 @@ export class ChatSettingsFeature {
     const panel = this.document.createElement('div');
     panel.classList.add('blobio-chat-settings-panel');
 
+    const modeButton = this.document.createElement('button');
+    modeButton.type = 'button';
+    modeButton.className = 'blobio-plus-mode-button';
+    modeButton.setAttribute('aria-label', 'Mode: Settings. Switch to Tasks');
+    const settingsLabel = this.document.createElement('span');
+    settingsLabel.textContent = 'Settings';
+    const tasksLabel = this.document.createElement('span');
+    tasksLabel.textContent = 'Tasks';
+    modeButton.append(settingsLabel, tasksLabel);
+
+    const settingsList = this.document.createElement('div');
+    settingsList.className = 'blobio-plus-settings-list';
+    const tasksView = this.document.createElement('div');
+    tasksView.className = 'blobio-plus-tasks-view';
+
     const chatButton = createCategoryButton(this.document, 'Chat-Settings', 'chat');
     const mutedButton = createCategoryButton(this.document, 'Muted-Players', 'muted');
     const hotkeyButton = createCategoryButton(this.document, 'HotKey', 'hotkey');
@@ -181,7 +221,11 @@ export class ChatSettingsFeature {
     const keyShortcutsButton = createCategoryButton(this.document, 'Key-Shortcuts', 'key-shortcuts');
     const captchaButton = createCategoryButton(this.document, 'Captcha-Logo', 'captcha');
     const leaderboardButton = createCategoryButton(this.document, 'Leaderboard-Settings', 'leaderboard');
-    panel.append(
+    const keystrokeButton = createCategoryButton(this.document, 'Keystroke-HUD', 'keystroke-hud');
+    const minimapButton = createCategoryButton(this.document, 'Minimap-Settings', 'minimap');
+    settingsList.append(
+      keystrokeButton,
+      minimapButton,
       chatButton,
       mutedButton,
       hotkeyButton,
@@ -192,6 +236,7 @@ export class ChatSettingsFeature {
       captchaButton,
       leaderboardButton,
     );
+    panel.append(modeButton, settingsList, tasksView);
 
     const chatCategory = createChatCategory(this.document);
     const mutedCategory = createMutedPlayersCategory(this.document);
@@ -202,7 +247,11 @@ export class ChatSettingsFeature {
     const keyShortcutsCategory = createKeyShortcutsCategory(this.document);
     const captchaCategory = createCaptchaCategory(this.document);
     const leaderboardCategory = createLeaderboardCategory(this.document);
+    const keystrokeCategory = createKeystrokeHudCategory(this.document);
+    const minimapCategory = createMinimapCategory(this.document);
     root.append(
+      keystrokeCategory,
+      minimapCategory,
       toggle,
       panel,
       chatCategory,
@@ -226,7 +275,13 @@ export class ChatSettingsFeature {
     toggle.addEventListener('click', () => {
       this.setOpen(!root.classList.contains('is-open'));
     });
+    modeButton.addEventListener('click', () => {
+      this.setPlusMode(!panel.classList.contains('is-tasks'));
+      this.positionUi();
+    });
 
+    this.bindCategoryButton(keystrokeButton);
+    this.bindCategoryButton(minimapButton);
     this.bindCategoryButton(chatButton);
     this.bindCategoryButton(mutedButton);
     this.bindCategoryButton(hotkeyButton);
@@ -237,6 +292,13 @@ export class ChatSettingsFeature {
     this.bindCategoryButton(captchaButton);
     this.bindCategoryButton(leaderboardButton);
 
+    this.bindKeystrokeCategory(keystrokeCategory);
+    this.bindColorSetting(minimapCategory, 'minimap-background', MINIMAP_BACKGROUND_KEYS, IN_GAME_UI_DEFAULTS.minimapBackground);
+    this.bindColorSetting(minimapCategory, 'minimap-outline', MINIMAP_OUTLINE_KEYS, IN_GAME_UI_DEFAULTS.minimapOutline);
+    this.bindColorSetting(minimapCategory, 'minimap-glow', MINIMAP_GLOW_KEYS, IN_GAME_UI_DEFAULTS.glow);
+    this.bindColorSetting(minimapCategory, 'minimap-grid', MINIMAP_GRID_KEYS, IN_GAME_UI_DEFAULTS.minimapGrid);
+    this.bindColorSetting(minimapCategory, 'minimap-font', MINIMAP_FONT_KEYS, IN_GAME_UI_DEFAULTS.minimapFont);
+    this.bindBlurSetting(minimapCategory, 'minimap-blur', MINIMAP_BLUR_KEY, 'minimapBlur');
     this.bindChatCategory(chatCategory);
     this.bindCaptchaCategory(captchaCategory);
     this.bindControlsCategory(controlsCategory);
@@ -560,88 +622,41 @@ export class ChatSettingsFeature {
   }
 
   ensureHotkeyLauncher() {
-    const panel = this.root?.querySelector?.('.blobio-chat-settings-panel');
-    if (!panel) {
-      return null;
-    }
-
-    let button = Array.from(panel.querySelectorAll?.('.blobio-chat-settings-category-button') || [])
-      .find((item) => item.dataset.category === 'hotkey');
-    if (!button) {
-      button = createCategoryButton(this.document, 'HotKey', 'hotkey');
-      panel.appendChild(button);
-    }
-
-    this.bindCategoryButton(button);
-    return button;
+    return this.ensureCategoryLauncher('HotKey', 'hotkey');
   }
 
   ensureControlsLauncher() {
-    const panel = this.root?.querySelector?.('.blobio-chat-settings-panel');
-    if (!panel) {
-      return null;
-    }
-
-    let button = Array.from(panel.querySelectorAll?.('.blobio-chat-settings-category-button') || [])
-      .find((item) => item.dataset.category === 'controls');
-    if (!button) {
-      button = createCategoryButton(this.document, 'Controls', 'controls');
-      const hotkey = panel.querySelector('.blobio-chat-settings-category-button[data-category="hotkey"]');
-      panel.insertBefore(button, hotkey?.nextSibling || null);
-    }
-
-    this.bindCategoryButton(button);
-    return button;
+    return this.ensureCategoryLauncher('Controls', 'controls', 'hotkey');
   }
 
   ensureAnimationSpeedLauncher() {
-    const panel = this.root?.querySelector?.('.blobio-chat-settings-panel');
-    if (!panel) {
-      return null;
-    }
-
-    let button = Array.from(panel.querySelectorAll?.('.blobio-chat-settings-category-button') || [])
-      .find((item) => item.dataset.category === 'animation');
-    if (!button) {
-      button = createCategoryButton(this.document, 'Anim-Speed', 'animation');
-      const controls = panel.querySelector('.blobio-chat-settings-category-button[data-category="controls"]');
-      panel.insertBefore(button, controls?.nextSibling || null);
-    }
-
-    this.bindCategoryButton(button);
-    return button;
+    return this.ensureCategoryLauncher('Anim-Speed', 'animation', 'controls');
   }
 
   ensureHudInfoLauncher() {
-    const panel = this.root?.querySelector?.('.blobio-chat-settings-panel');
-    if (!panel) {
-      return null;
-    }
-
-    let button = Array.from(panel.querySelectorAll?.('.blobio-chat-settings-category-button') || [])
-      .find((item) => item.dataset.category === 'hud-info');
-    if (!button) {
-      button = createCategoryButton(this.document, 'HUD-Info', 'hud-info');
-      const animation = panel.querySelector('.blobio-chat-settings-category-button[data-category="animation"]');
-      panel.insertBefore(button, animation?.nextSibling || null);
-    }
-
-    this.bindCategoryButton(button);
-    return button;
+    return this.ensureCategoryLauncher('HUD-Info', 'hud-info', 'animation');
   }
 
   ensureKeyShortcutsLauncher() {
-    const panel = this.root?.querySelector?.('.blobio-chat-settings-panel');
-    if (!panel) {
+    return this.ensureCategoryLauncher('Key-Shortcuts', 'key-shortcuts', 'hud-info');
+  }
+
+  ensureCategoryLauncher(label, category, afterCategory = null) {
+    const list = this.root?.querySelector?.('.blobio-plus-settings-list');
+    if (!list) {
       return null;
     }
 
-    let button = Array.from(panel.querySelectorAll?.('.blobio-chat-settings-category-button') || [])
-      .find((item) => item.dataset.category === 'key-shortcuts');
+    let button = Array.from(list.querySelectorAll?.('.blobio-chat-settings-category-button') || [])
+      .find((item) => item.dataset.category === category);
     if (!button) {
-      button = createCategoryButton(this.document, 'Key-Shortcuts', 'key-shortcuts');
-      const hudInfo = panel.querySelector('.blobio-chat-settings-category-button[data-category="hud-info"]');
-      panel.insertBefore(button, hudInfo?.nextSibling || null);
+      button = createCategoryButton(this.document, label, category);
+      if (afterCategory === null) {
+        list.appendChild(button);
+      } else {
+        const previous = list.querySelector(`.blobio-chat-settings-category-button[data-category="${afterCategory}"]`);
+        list.insertBefore(button, previous?.nextSibling || null);
+      }
     }
 
     this.bindCategoryButton(button);
@@ -655,26 +670,39 @@ export class ChatSettingsFeature {
     const number = font.querySelector('.blobio-chat-font-number');
 
     fontToggle.addEventListener('click', () => {
+      for (const pending of this.settingDrags) pending.flush();
       setChatFontSizeEnabled(this.storage, !isChatFontSizeEnabled(this.storage));
       this.syncVisualSettingsUi();
       this.applyRuntimeUi();
     });
 
+    let size = getChatFontSize(this.storage);
+    const drag = createSettingsDrag(this.document.defaultView || globalThis, () => {
+      const value = String(size);
+      if (range.value !== value) range.value = value;
+      if (number.value !== value) number.value = value;
+      this.applyChatFontSize(size);
+    }, () => setChatFontSize(this.storage, size));
+    this.settingDrags.push(drag);
     const updateSize = (value) => {
-      const size = setChatFontSize(this.storage, value);
-      range.value = String(size);
-      number.value = String(size);
-      this.applyRuntimeUi();
+      size = setChatFontSize(null, value);
+      drag.schedule();
     };
+    range.addEventListener('change', () => drag.flush());
+    number.addEventListener('blur', () => drag.flush());
     range.addEventListener('input', () => updateSize(range.value));
     number.addEventListener('input', () => updateSize(number.value));
-    number.addEventListener('change', () => updateSize(number.value));
+    number.addEventListener('change', () => { updateSize(number.value); drag.flush(); });
 
     this.bindColorSetting(category, 'chat-background', CHAT_BACKGROUND_KEYS, IN_GAME_UI_DEFAULTS.chatBackground);
+    this.bindColorSetting(category, 'chat-slider', CHAT_SLIDER_KEYS, IN_GAME_UI_DEFAULTS.chatSlider);
     this.bindColorSetting(category, 'chat-outline', CHAT_OUTLINE_KEYS, IN_GAME_UI_DEFAULTS.chatOutline);
+    this.bindColorSetting(category, 'chat-glow', CHAT_GLOW_KEYS, IN_GAME_UI_DEFAULTS.glow);
 
+    this.bindBlurSetting(category, 'chat-blur', CHAT_BLUR_KEY, 'chatBlur');
     const smooth = category.querySelector('[data-setting="smooth-chat"] .blobio-setting-toggle');
     smooth.addEventListener('click', () => {
+      for (const pending of this.settingDrags) pending.flush();
       setBooleanSetting(this.storage, SMOOTH_CHAT_KEY, !getBooleanSetting(this.storage, SMOOTH_CHAT_KEY, true));
       this.syncVisualSettingsUi();
       this.applyRuntimeUi();
@@ -695,27 +723,44 @@ export class ChatSettingsFeature {
   }
 
   bindLeaderboardCategory(category) {
+    this.bindBlurSetting(category, 'leaderboard-blur', LEADERBOARD_BLUR_KEY, 'leaderboardBlur');
     const font = category.querySelector('[data-setting="leaderboard"]');
     const fontToggle = font.querySelector('.blobio-setting-toggle');
     const range = font.querySelector('.blobio-chat-font-range');
     const number = font.querySelector('.blobio-chat-font-number');
 
     fontToggle.addEventListener('click', () => {
+      for (const pending of this.settingDrags) pending.flush();
       const current = getLeaderboardFontSetting(this.storage);
       setLeaderboardFontSetting(this.storage, { enabled: !current.enabled });
       this.syncVisualSettingsUi();
       this.applyRuntimeUi();
     });
 
+    let setting = null;
+    const drag = createSettingsDrag(this.document.defaultView || globalThis, () => {
+      const value = String(setting.value);
+      if (range.value !== value) range.value = value;
+      if (number.value !== value) number.value = value;
+      this.uiCustomization?.applyLeaderboardAppearance?.({
+        ...readInGameUiSettings(this.storage), leaderboardFont: setting,
+      });
+    }, () => {
+      setLeaderboardFontSetting(this.storage, setting);
+      setting = null;
+    });
+    this.settingDrags.push(drag);
     const updateSize = (value) => {
-      const setting = setLeaderboardFontSetting(this.storage, { value });
-      range.value = String(setting.value);
-      number.value = String(setting.value);
-      this.applyRuntimeUi();
+      setting = setLeaderboardFontSetting(null, {
+        ...(setting || getLeaderboardFontSetting(this.storage)), value,
+      });
+      drag.schedule();
     };
+    range.addEventListener('change', () => drag.flush());
+    number.addEventListener('blur', () => drag.flush());
     range.addEventListener('input', () => updateSize(range.value));
     number.addEventListener('input', () => updateSize(number.value));
-    number.addEventListener('change', () => updateSize(number.value));
+    number.addEventListener('change', () => { updateSize(number.value); drag.flush(); });
 
     this.bindColorSetting(
       category,
@@ -729,6 +774,7 @@ export class ChatSettingsFeature {
       LEADERBOARD_OUTLINE_KEYS,
       IN_GAME_UI_DEFAULTS.leaderboardOutline,
     );
+    this.bindColorSetting(category, 'leaderboard-glow', LEADERBOARD_GLOW_KEYS, IN_GAME_UI_DEFAULTS.glow);
   }
 
   bindAnimationSpeedCategory(category) {
@@ -739,6 +785,7 @@ export class ChatSettingsFeature {
     const reset = group.querySelector('.blobio-animation-speed-reset');
 
     toggle.addEventListener('click', () => {
+      for (const pending of this.settingDrags) pending.flush();
       const current = getAnimationSpeedSetting(this.storage);
       setAnimationSpeedSetting(this.storage, { enabled: !current.enabled });
       this.syncVisualSettingsUi();
@@ -746,6 +793,7 @@ export class ChatSettingsFeature {
     });
 
     modeButton.addEventListener('click', () => {
+      for (const pending of this.settingDrags) pending.flush();
       const current = getAnimationSpeedSetting(this.storage);
       const mode = current.mode === ANIMATION_SPEED_MODES.friendly
         ? ANIMATION_SPEED_MODES.unsafe
@@ -755,13 +803,25 @@ export class ChatSettingsFeature {
       this.applyAnimationSpeed();
     });
 
-    slider.addEventListener('input', () => {
-      setAnimationSpeedSetting(this.storage, { slider: slider.value });
-      this.syncVisualSettingsUi();
-      this.applyAnimationSpeed();
+    let draft = null;
+    const drag = createSettingsDrag(this.document.defaultView || globalThis, () => {
+      this.syncAnimationSpeedSetting(draft);
+      this.applyAnimationSpeed(draft);
+    }, () => {
+      setAnimationSpeedSetting(this.storage, draft);
+      draft = null;
     });
+    this.settingDrags.push(drag);
+    slider.addEventListener('input', () => {
+      draft = setAnimationSpeedSetting(null, {
+        ...(draft || getAnimationSpeedSetting(this.storage)), slider: slider.value,
+      });
+      drag.schedule();
+    });
+    slider.addEventListener('change', () => drag.flush());
 
     reset.addEventListener('click', () => {
+      for (const pending of this.settingDrags) pending.flush();
       setAnimationSpeedSetting(this.storage, { slider: ANIMATION_SPEED_LIMITS.defaultValue });
       this.syncVisualSettingsUi();
       this.applyAnimationSpeed();
@@ -872,7 +932,7 @@ export class ChatSettingsFeature {
     for (const [settingName, key] of booleanBindings) {
       const toggle = category.querySelector(`[data-setting="${settingName}"] .blobio-setting-toggle`);
       toggle?.addEventListener('click', () => {
-        this.commitHudColorDraft();
+        this.hudDrag.flush();
         const current = readHudInfoSettings(this.storage);
         saveHudInfoSettings(this.storage, { ...current, [key]: !current[key] });
         this.syncVisualSettingsUi();
@@ -880,34 +940,28 @@ export class ChatSettingsFeature {
       });
     }
 
-    this.bindHudModeButton(category, 'hud-position', 'positionMode', HUD_INFO_POSITION_MODES);
-    this.bindHudModeButton(category, 'hud-layout', 'layoutMode', HUD_INFO_LAYOUT_MODES);
-    this.bindHudModeButton(category, 'hud-style', 'styleMode', HUD_INFO_STYLE_MODES);
-    this.bindHudModeButton(category, 'hud-fps-mode', 'fpsMode', HUD_INFO_DATA_MODES);
-    this.bindHudModeButton(category, 'hud-score-mode', 'scoreMode', HUD_INFO_DATA_MODES);
-    this.bindHudModeButton(category, 'hud-ping-mode', 'pingMode', HUD_INFO_DATA_MODES);
-    this.bindHudModeButton(category, 'hud-booster-name-mode', 'boosterNameMode', HUD_INFO_BOOSTER_COLOR_MODES);
-    this.bindHudModeButton(
-      category,
-      'hud-booster-duration-mode',
-      'boosterDurationMode',
-      HUD_INFO_BOOSTER_DURATION_COLOR_MODES,
-    );
+    this.bindHudModeChoices(category, 'hud-position', 'positionMode');
+    this.bindHudModeChoices(category, 'hud-layout', 'layoutMode');
+    this.bindHudModeChoices(category, 'hud-style', 'styleMode');
+    this.bindHudModeChoices(category, 'hud-fps-mode', 'fpsMode');
+    this.bindHudModeChoices(category, 'hud-score-mode', 'scoreMode');
+    this.bindHudModeChoices(category, 'hud-ping-mode', 'pingMode');
+    this.bindHudModeChoices(category, 'hud-booster-name-mode', 'boosterNameMode');
+    this.bindHudModeChoices(category, 'hud-booster-duration-mode', 'boosterDurationMode');
 
     const sizeGroup = category.querySelector('[data-setting="hud-font-size"]');
     const range = sizeGroup.querySelector('.blobio-chat-font-range');
     const number = sizeGroup.querySelector('.blobio-chat-font-number');
     const updateSize = (value) => {
-      this.commitHudColorDraft();
-      const current = readHudInfoSettings(this.storage);
-      const next = saveHudInfoSettings(this.storage, { ...current, fontSize: value });
-      range.value = String(next.fontSize);
-      number.value = String(next.fontSize);
-      this.applyHudInfo();
+      this.updateHudColorDraft({ fontSize: value });
+      range.value = String(this.hudColorDraft.fontSize);
+      number.value = String(this.hudColorDraft.fontSize);
     };
     range.addEventListener('input', () => updateSize(range.value));
     number.addEventListener('input', () => updateSize(number.value));
-    number.addEventListener('change', () => updateSize(number.value));
+    range.addEventListener('change', () => this.hudDrag.flush());
+    number.addEventListener('change', () => { updateSize(number.value); this.hudDrag.flush(); });
+    number.addEventListener('blur', () => this.hudDrag.flush());
 
     const colorGroup = category.querySelector('[data-setting="hud-color"]');
     const color = colorGroup.querySelector('.blobio-ui-color-input');
@@ -918,8 +972,8 @@ export class ChatSettingsFeature {
     alpha.addEventListener('input', () => {
       this.updateHudColorDraft({ alpha: alpha.value });
     });
-    color.addEventListener('change', () => this.commitHudColorDraft());
-    alpha.addEventListener('change', () => this.commitHudColorDraft());
+    color.addEventListener('change', () => this.hudDrag.flush());
+    alpha.addEventListener('change', () => this.hudDrag.flush());
 
     this.bindHudBoosterColor(category, 'hud-booster-merge-color', 'boosterMergeColor', 'boosterMergeAlpha');
     this.bindHudBoosterColor(category, 'hud-booster-speed-color', 'boosterSpeedColor', 'boosterSpeedAlpha');
@@ -940,20 +994,110 @@ export class ChatSettingsFeature {
     alpha.addEventListener('input', () => {
       this.updateHudColorDraft({ [alphaKey]: alpha.value });
     });
-    color.addEventListener('change', () => this.commitHudColorDraft());
-    alpha.addEventListener('change', () => this.commitHudColorDraft());
+    color.addEventListener('change', () => this.hudDrag.flush());
+    alpha.addEventListener('change', () => this.hudDrag.flush());
   }
 
-  bindHudModeButton(category, settingName, key, options) {
-    const button = category.querySelector(`[data-setting="${settingName}"] .blobio-hud-mode-button`);
-    button?.addEventListener('click', () => {
-      this.commitHudColorDraft();
+  bindHudModeChoices(category, settingName, key) {
+    const choices = category.querySelector(`[data-setting="${settingName}"] .blobio-hud-mode-choices`);
+    choices?.addEventListener('click', (event) => {
+      const value = event.target.closest('button[data-mode]')?.dataset.mode;
+      if (!value) return;
+      this.hudDrag.flush();
       const current = readHudInfoSettings(this.storage);
-      const value = nextHudInfoMode(current[key], options);
+      if (current[key] === value) return;
       saveHudInfoSettings(this.storage, { ...current, [key]: value });
       this.syncVisualSettingsUi();
       this.applyHudInfo();
     });
+  }
+
+  bindBlurSetting(category, name, key, settingKey) {
+    const group = category.querySelector('[data-setting="' + name + '"]');
+    const toggle = group.querySelector('.blobio-setting-toggle');
+    const range = group.querySelector('.blobio-chat-font-range');
+    const number = group.querySelector('.blobio-chat-font-number');
+    let draft = null;
+    const drag = createSettingsDrag(this.document.defaultView || globalThis, () => {
+      this.syncFontSetting(name, draft);
+      const appearance = { ...readInGameUiSettings(this.storage), [settingKey]: draft };
+      if (key === CHAT_BLUR_KEY) this.uiCustomization?.applyChatAppearance?.(appearance);
+      else if (key === LEADERBOARD_BLUR_KEY) this.uiCustomization?.applyLeaderboardAppearance?.(appearance);
+      else this.minimapAppearance?.refresh(appearance);
+    }, () => { setBlurSetting(this.storage, key, draft); draft = null; });
+    this.settingDrags.push(drag);
+    toggle.addEventListener('click', () => {
+      drag.flush();
+      setBlurSetting(this.storage, key, { enabled: !getBlurSetting(this.storage, key).enabled });
+      this.syncVisualSettingsUi();
+      this.applyRuntimeUi();
+    });
+    for (const input of [range, number]) {
+      input.addEventListener('input', () => {
+        if (!draft) {
+          for (const pending of this.settingDrags) if (pending !== drag) pending.flush();
+        }
+        draft = normalizeBlurSetting({ ...(draft || getBlurSetting(this.storage, key)), value: input.value });
+        drag.schedule();
+      });
+      input.addEventListener('change', () => drag.flush());
+      input.addEventListener('blur', () => drag.flush());
+    }
+  }
+
+  bindKeystrokeCategory(category) {
+    let draft = null;
+    const drag = createSettingsDrag(this.document.defaultView || globalThis, () => {
+      this.syncKeystrokeSetting(draft);
+      this.keystrokeHud?.refresh(draft);
+    }, () => { saveKeystrokeHudSettings(this.storage, draft); draft = null; });
+    this.settingDrags.push(drag);
+    for (const [name, key] of [['keystroke-enabled', 'enabled'], ['keystroke-position-editor', 'positionEditor'], ['keystroke-blur', 'blur']]) {
+      category.querySelector('[data-setting="' + name + '"] .blobio-setting-toggle').addEventListener('click', () => {
+        drag.flush();
+        const current = readKeystrokeHudSettings(this.storage);
+        const value = key === 'blur' ? { ...current.blur, enabled: !current.blur.enabled } : !current[key];
+        saveKeystrokeHudSettings(this.storage, { [key]: value });
+        this.syncVisualSettingsUi();
+        this.keystrokeHud?.refresh();
+      });
+    }
+    category.querySelector('[data-setting="keystroke-layout"] button').addEventListener('click', () => {
+      drag.flush();
+      const current = readKeystrokeHudSettings(this.storage);
+      saveKeystrokeHudSettings(this.storage, { layout: current.layout === 'horizontal' ? 'vertical' : 'horizontal' });
+      this.syncVisualSettingsUi();
+      this.keystrokeHud?.refresh();
+    });
+    for (const input of category.querySelectorAll('input')) {
+      input.addEventListener('input', () => {
+        draft ||= readKeystrokeHudSettings(this.storage);
+        const name = input.closest('[data-setting]').dataset.setting.slice('keystroke-'.length);
+        if (name === 'size') draft.size = input.value;
+        else if (name === 'blur') draft.blur = normalizeBlurSetting({ ...draft.blur, value: input.value });
+        else draft[name] = { ...draft[name], [input.type === 'color' ? 'color' : 'alpha']: input.value };
+        draft = normalizeKeystrokeHudSettings(draft);
+        drag.schedule();
+      });
+      input.addEventListener('change', () => drag.flush());
+      input.addEventListener('blur', () => drag.flush());
+    }
+  }
+
+  syncKeystrokeSetting(setting) {
+    this.syncBooleanSetting('keystroke-enabled', setting.enabled);
+    this.syncBooleanSetting('keystroke-position-editor', setting.positionEditor);
+    this.syncFontSetting('keystroke-blur', setting.blur);
+    const mode = this.root?.querySelector('[data-setting="keystroke-layout"] button');
+    if (mode) this.syncModeButton(mode, setting.layout, [['horizontal', 'Horizontal'], ['vertical', 'Vertical']]);
+    for (const input of this.root?.querySelectorAll('[data-setting="keystroke-size"] input') || []) {
+      if (input.value !== String(setting.size)) input.value = String(setting.size);
+    }
+    for (const name of Object.keys(KEYSTROKE_COLORS)) {
+      this.syncColorControls('keystroke-' + name, setting[name].color, setting[name].alpha);
+    }
+    this.root?.querySelector('.blobio-chat-settings-category-button[data-category="keystroke-hud"]')
+      ?.classList.toggle('has-active-setting', setting.enabled);
   }
 
   bindColorSetting(category, name, keys, defaults) {
@@ -961,23 +1105,58 @@ export class ChatSettingsFeature {
     const toggle = group.querySelector('.blobio-setting-toggle');
     const color = group.querySelector('.blobio-ui-color-input');
     const alpha = group.querySelector('.blobio-ui-alpha-range');
-
+    const mode = group.querySelector('.blobio-background-mode');
+    const secondary = group.querySelector('.blobio-secondary-color');
+    const secondaryAlpha = group.querySelector('.blobio-secondary-alpha');
+    const angle = group.querySelector('.blobio-gradient-angle');
+    const glow = group.querySelector('.blobio-outline-glow-range');
+    const settingKey = name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    let draft = null;
+    let appearance = null;
+    const drag = createSettingsDrag(this.document.defaultView || globalThis, () => {
+      this.syncColorSetting(name, draft);
+      appearance[settingKey] = draft;
+      if (name.startsWith('minimap-')) this.minimapAppearance?.refresh(appearance);
+      else if (name.startsWith('chat-')) this.uiCustomization?.applyChatAppearance?.(appearance);
+      else this.uiCustomization?.applyLeaderboardAppearance?.(appearance);
+    }, () => {
+      setColorSetting(this.storage, keys, draft, defaults);
+      draft = null;
+      appearance = null;
+    });
+    this.settingDrags.push(drag);
     toggle.addEventListener('click', () => {
+      drag.flush();
       const current = getColorSetting(this.storage, keys, defaults);
       setColorSetting(this.storage, keys, { enabled: !current.enabled }, defaults);
       this.syncVisualSettingsUi();
       this.applyRuntimeUi();
     });
-    color.addEventListener('input', () => {
-      setColorSetting(this.storage, keys, { color: color.value }, defaults);
+    mode?.addEventListener('click', () => {
+      drag.flush();
+      const current = getColorSetting(this.storage, keys, defaults);
+      setColorSetting(this.storage, keys, { mode: current.mode === 'rgb' ? 'gradient' : 'rgb' }, defaults);
       this.syncVisualSettingsUi();
       this.applyRuntimeUi();
     });
-    alpha.addEventListener('input', () => {
-      setColorSetting(this.storage, keys, { alpha: alpha.value }, defaults);
-      this.syncVisualSettingsUi();
-      this.applyRuntimeUi();
-    });
+    for (const input of [color, alpha, secondary, secondaryAlpha, angle, glow].filter(Boolean)) {
+      input.addEventListener('input', () => {
+        if (!draft) {
+          for (const pending of this.settingDrags) if (pending !== drag) pending.flush();
+        }
+        appearance ||= readInGameUiSettings(this.storage);
+        draft = setColorSetting(null, keys, {
+          ...(draft || getColorSetting(this.storage, keys, defaults)),
+          color: color.value, alpha: alpha.value,
+          secondaryColor: secondary?.value, angle: angle?.value,
+          secondaryAlpha: secondaryAlpha?.value,
+          glow: glow?.value,
+        }, defaults);
+        drag.schedule();
+      });
+      input.addEventListener('change', () => drag.flush());
+      input.addEventListener('blur', () => drag.flush());
+    }
   }
 
   applyRuntimeUi() {
@@ -986,6 +1165,8 @@ export class ChatSettingsFeature {
     this.applyHudInfo();
     this.applyCellPauseSettings();
     this.uiCustomization?.applyAll?.();
+    this.keystrokeHud?.refresh();
+    this.minimapAppearance?.refresh();
   }
 
   applyCellPauseSettings() {
@@ -993,9 +1174,8 @@ export class ChatSettingsFeature {
     win.__blobioCellPauseRefresh?.(readCellPauseSettings(this.storage));
   }
 
-  applyAnimationSpeed() {
+  applyAnimationSpeed(setting = getAnimationSpeedSetting(this.storage)) {
     const win = this.document.defaultView || globalThis;
-    const setting = getAnimationSpeedSetting(this.storage);
     win.__blobioAnimationSpeedRefresh?.({
       enabled: setting.enabled,
       speed: setting.enabled ? setting.speed : 1,
@@ -1013,96 +1193,143 @@ export class ChatSettingsFeature {
       ...(this.hudColorDraft || readHudInfoSettings(this.storage)),
       ...changes,
     });
-    this.syncHudColorControls(this.hudColorDraft);
-    this.syncHudBoosterColorControls(
-      'hud-booster-merge-color',
-      this.hudColorDraft.boosterMergeColor,
-      this.hudColorDraft.boosterMergeAlpha,
-    );
-    this.syncHudBoosterColorControls(
-      'hud-booster-speed-color',
-      this.hudColorDraft.boosterSpeedColor,
-      this.hudColorDraft.boosterSpeedAlpha,
-    );
-    this.syncHudBoosterColorControls(
-      'hud-booster-virus-color',
-      this.hudColorDraft.boosterVirusColor,
-      this.hudColorDraft.boosterVirusAlpha,
-    );
-    this.scheduleHudColorPreview(this.hudColorDraft);
-    this.scheduleHudColorCommit();
+    this.hudDrag.schedule();
   }
 
-  scheduleHudColorPreview(settings) {
-    const win = this.document.defaultView || globalThis;
-    this.hudColorPreviewSettings = settings;
-    if (this.hudColorPreviewFrame !== null) {
-      return;
+  setPlusMode(tasks) {
+    const panel = this.root?.querySelector('.blobio-chat-settings-panel');
+    if (!panel) return;
+    const previousHeight = panel.getBoundingClientRect().height;
+
+    if (tasks) {
+      const openCategory = this.root.querySelector('.blobio-chat-settings-category.is-open');
+      if (openCategory) this.toggleCategory(openCategory.dataset.category);
+    } else {
+      this.stopInGameTasks();
     }
 
-    const run = () => {
-      this.hudColorPreviewFrame = null;
-      const next = this.hudColorPreviewSettings;
-      this.hudColorPreviewSettings = null;
-      if (next) {
-        this.applyHudInfo(next);
+    panel.classList.toggle('is-tasks', tasks);
+    const modeButton = panel.querySelector('.blobio-plus-mode-button');
+    modeButton.classList.toggle('is-tasks', tasks);
+    modeButton.setAttribute('aria-label', tasks
+      ? 'Mode: Tasks. Switch to Settings'
+      : 'Mode: Settings. Switch to Tasks');
+
+    if (tasks) {
+      panel.querySelector('.blobio-plus-tasks-view').textContent = 'Loading daily tasks…';
+      this.refreshInGameTasks();
+      this.dailyTaskTimer = this.document.defaultView.setInterval(() => this.refreshInGameTasks(), 60_000);
+    }
+    this.animatePlusPanelHeight(panel, previousHeight);
+  }
+
+  animatePlusPanelHeight(panel, previousHeight) {
+    if (this.document.defaultView.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    panel.getAnimations().forEach((animation) => animation.cancel());
+    const nextHeight = panel.getBoundingClientRect().height;
+    if (previousHeight === nextHeight) return;
+    panel.animate([{ height: `${previousHeight}px` }, { height: `${nextHeight}px` }], {
+      duration: 220,
+      easing: 'ease-in-out',
+    });
+  }
+
+  async refreshInGameTasks() {
+    const panel = this.root?.querySelector('.blobio-chat-settings-panel');
+    if (!this.root?.classList.contains('is-open') || !panel?.classList.contains('is-tasks')) return;
+
+    this.dailyTaskRequest?.abort();
+    const request = new AbortController();
+    this.dailyTaskRequest = request;
+    const view = panel.querySelector('.blobio-plus-tasks-view');
+
+    try {
+      const result = await loadDailyTasks({
+        fetch: this.document.defaultView.fetch.bind(this.document.defaultView),
+        token: this.storage.getItem('access-token'),
+        names: this.dailyTaskNames,
+        signal: request.signal,
+      });
+      if (request.signal.aborted) return;
+      this.dailyTaskNames = result.names;
+      this.renderInGameTasks(view, result);
+    } catch (error) {
+      if (request.signal.aborted) return;
+      view.textContent = error.message === 'sign-in-required'
+        ? 'Sign in to see your daily tasks.'
+        : 'Daily tasks are unavailable. Switch to Settings and back to retry.';
+    } finally {
+      if (this.dailyTaskRequest === request) this.dailyTaskRequest = null;
+    }
+  }
+
+  renderInGameTasks(view, result) {
+    const panel = view.parentElement;
+    const previousHeight = panel.getBoundingClientRect().height;
+    view.textContent = '';
+    const reset = this.document.createElement('div');
+    reset.className = 'blobio-plus-tasks-reset';
+    reset.textContent = formatDailyReset(result.resetInMs);
+    view.appendChild(reset);
+
+    for (const task of result.tasks) {
+      const completed = task.p >= task.l;
+      const row = this.document.createElement('div');
+      row.className = completed ? 'blobio-plus-task is-complete' : 'blobio-plus-task';
+      const top = this.document.createElement('div');
+      top.className = 'blobio-plus-task-top';
+      const objective = this.document.createElement('span');
+      objective.className = 'blobio-plus-task-objective';
+      objective.textContent = result.names[task.id]?.d || result.names[task.id]?.n || `Task ${task.id}`;
+      const reward = this.document.createElement('span');
+      reward.className = 'blobio-plus-task-reward';
+      const coin = this.document.createElement('img');
+      coin.src = this.dailyTaskCoin;
+      coin.alt = '';
+      reward.append(coin, String(task.rv));
+      top.append(objective, reward);
+      row.appendChild(top);
+
+      if (completed) {
+        const label = this.document.createElement('span');
+        label.className = 'blobio-task-completed';
+        label.textContent = 'COMPLETED';
+        row.appendChild(label);
+      } else {
+        const progress = this.document.createElement('div');
+        progress.className = 'blobio-plus-task-progress';
+        progress.setAttribute('role', 'progressbar');
+        progress.setAttribute('aria-label', objective.textContent);
+        progress.setAttribute('aria-valuenow', String(task.p));
+        progress.setAttribute('aria-valuemin', '0');
+        progress.setAttribute('aria-valuemax', String(task.l));
+        const fill = this.document.createElement('span');
+        fill.style.width = `${Math.min(100, task.p / task.l * 100)}%`;
+        progress.appendChild(fill);
+        const count = this.document.createElement('span');
+        count.className = 'blobio-plus-task-count';
+        count.textContent = `${task.p} / ${task.l}`;
+        row.append(progress, count);
       }
-    };
-    const raf = win.requestAnimationFrame || ((callback) => win.setTimeout?.(callback, 16));
-    this.hudColorPreviewFrame = typeof raf === 'function' ? raf(run) : null;
-    if (this.hudColorPreviewFrame === null || this.hudColorPreviewFrame === undefined) {
-      run();
+      view.appendChild(row);
     }
+
+    if (result.tasks.length === 0) {
+      const empty = this.document.createElement('div');
+      empty.textContent = 'No daily tasks available.';
+      view.appendChild(empty);
+    }
+    this.animatePlusPanelHeight(panel, previousHeight);
+    this.positionUi();
   }
 
-  scheduleHudColorCommit() {
-    const win = this.document.defaultView || globalThis;
-    if (this.hudColorCommitTimer !== null) {
-      win.clearTimeout?.(this.hudColorCommitTimer);
-      this.hudColorCommitTimer = null;
+  stopInGameTasks() {
+    this.dailyTaskRequest?.abort();
+    this.dailyTaskRequest = null;
+    if (this.dailyTaskTimer !== null) {
+      this.document.defaultView.clearInterval(this.dailyTaskTimer);
+      this.dailyTaskTimer = null;
     }
-
-    if (typeof win.setTimeout !== 'function') {
-      this.commitHudColorDraft();
-      return;
-    }
-
-    this.hudColorCommitTimer = win.setTimeout(() => {
-      this.hudColorCommitTimer = null;
-      this.commitHudColorDraft();
-    }, HUD_COLOR_COMMIT_DELAY_MS);
-  }
-
-  commitHudColorDraft() {
-    if (!this.hudColorDraft) {
-      return null;
-    }
-
-    this.clearHudColorCommitTimer();
-    const next = saveHudInfoSettings(this.storage, this.hudColorDraft);
-    this.hudColorDraft = null;
-    this.syncHudInfoSetting(next);
-    this.applyHudInfo(next);
-    return next;
-  }
-
-  clearHudColorCommitTimer() {
-    if (this.hudColorCommitTimer === null) {
-      return;
-    }
-    const win = this.document.defaultView || globalThis;
-    win.clearTimeout?.(this.hudColorCommitTimer);
-    this.hudColorCommitTimer = null;
-  }
-
-  clearHudColorPreviewFrame() {
-    if (this.hudColorPreviewFrame === null) {
-      return;
-    }
-    const win = this.document.defaultView || globalThis;
-    win.cancelAnimationFrame?.(this.hudColorPreviewFrame);
-    this.hudColorPreviewFrame = null;
-    this.hudColorPreviewSettings = null;
   }
 
   setOpen(open) {
@@ -1122,6 +1349,7 @@ export class ChatSettingsFeature {
     if (open) {
       this.root.classList.add('is-open');
     } else {
+      this.setPlusMode(false);
       this.root.classList.remove('is-open');
       this.finishNameEdit();
       this.cancelHotkeyCapture();
@@ -1194,32 +1422,55 @@ export class ChatSettingsFeature {
   }
 
   syncVisualSettingsUi() {
+    for (const drag of this.settingDrags) drag.flush();
+    this.hudDrag.flush();
     if (!this.root) {
       return;
     }
 
     const settings = readInGameUiSettings(this.storage);
+    const chatFontSizeEnabled = isChatFontSizeEnabled(this.storage);
     this.syncFontSetting('chat', {
-      enabled: isChatFontSizeEnabled(this.storage),
+      enabled: chatFontSizeEnabled,
       value: getChatFontSize(this.storage),
     });
     this.syncFontSetting('leaderboard', settings.leaderboardFont);
+    this.syncFontSetting('chat-blur', settings.chatBlur);
+    this.syncFontSetting('leaderboard-blur', settings.leaderboardBlur);
+    this.syncFontSetting('minimap-blur', settings.minimapBlur);
+    this.syncColorSetting('minimap-background', settings.minimapBackground);
+    this.syncColorSetting('minimap-outline', settings.minimapOutline);
+    this.syncColorSetting('minimap-glow', settings.minimapGlow);
+    this.syncColorSetting('chat-glow', settings.chatGlow);
+    this.syncColorSetting('leaderboard-glow', settings.leaderboardGlow);
+    this.syncColorSetting('minimap-grid', settings.minimapGrid);
+    this.syncColorSetting('minimap-font', settings.minimapFont);
+    this.syncKeystrokeSetting(readKeystrokeHudSettings(this.storage));
+    this.root.querySelector('.blobio-chat-settings-category-button[data-category="minimap"]')
+      ?.classList.toggle('has-active-setting', settings.minimapBackground.enabled || settings.minimapBlur.enabled);
     this.syncColorSetting('chat-background', settings.chatBackground);
+    this.syncColorSetting('chat-slider', settings.chatSlider);
     this.syncColorSetting('chat-outline', settings.chatOutline);
     this.syncColorSetting('leaderboard-background', settings.leaderboardBackground);
     this.syncColorSetting('leaderboard-outline', settings.leaderboardOutline);
-    this.syncAnimationSpeedSetting(getAnimationSpeedSetting(this.storage));
-    this.syncCellPauseSetting(readCellPauseSettings(this.storage));
-    this.syncHudInfoSetting(readHudInfoSettings(this.storage));
+    const animationSpeed = getAnimationSpeedSetting(this.storage);
+    this.syncAnimationSpeedSetting(animationSpeed);
+    const cellPause = readCellPauseSettings(this.storage);
+    this.syncCellPauseSetting(cellPause);
+    const hudInfo = readHudInfoSettings(this.storage);
+    this.syncHudInfoSetting(hudInfo);
     this.syncBooleanSetting('smooth-chat', settings.smoothChat);
     this.syncBooleanSetting('captcha-logo', settings.hideCaptchaLogo);
     this.syncBooleanSetting('key-shortcuts', settings.hideKeyShortcuts);
 
-    const chatActive = isChatFontSizeEnabled(this.storage)
+    const chatActive = chatFontSizeEnabled
+      || settings.chatBlur.enabled
       || settings.chatBackground.enabled
+      || settings.chatSlider.enabled
       || settings.chatOutline.enabled
       || settings.smoothChat;
     const leaderboardActive = settings.leaderboardFont.enabled
+      || settings.leaderboardBlur.enabled
       || settings.leaderboardBackground.enabled
       || settings.leaderboardOutline.enabled;
 
@@ -1230,11 +1481,11 @@ export class ChatSettingsFeature {
     this.root.querySelector('.blobio-chat-settings-category-button[data-category="leaderboard"]')
       ?.classList.toggle('has-active-setting', leaderboardActive);
     this.root.querySelector('.blobio-chat-settings-category-button[data-category="animation"]')
-      ?.classList.toggle('has-active-setting', getAnimationSpeedSetting(this.storage).enabled);
+      ?.classList.toggle('has-active-setting', animationSpeed.enabled);
     this.root.querySelector('.blobio-chat-settings-category-button[data-category="controls"]')
-      ?.classList.toggle('has-active-setting', readCellPauseSettings(this.storage).enabled);
+      ?.classList.toggle('has-active-setting', cellPause.enabled);
     this.root.querySelector('.blobio-chat-settings-category-button[data-category="hud-info"]')
-      ?.classList.toggle('has-active-setting', readHudInfoSettings(this.storage).enabled);
+      ?.classList.toggle('has-active-setting', hudInfo.enabled);
     this.root.querySelector('.blobio-chat-settings-category-button[data-category="key-shortcuts"]')
       ?.classList.toggle('has-active-setting', settings.hideKeyShortcuts);
   }
@@ -1253,11 +1504,10 @@ export class ChatSettingsFeature {
 
     toggle.textContent = setting.enabled ? 'true' : 'false';
     toggle.classList.toggle('is-enabled', setting.enabled);
-    modeButton.textContent = modeInfo.label;
+    this.syncModeButton(modeButton, setting.mode, Object.entries(ANIMATION_SPEED_MODE_INFO).map(([value, info]) => [value, info.label]));
     modeButton.removeAttribute?.('title');
     modeButton.dataset.blobioTooltip = modeInfo.description;
-    modeButton.dataset.mode = setting.mode;
-    slider.value = String(setting.slider);
+    if (slider.value !== String(setting.slider)) slider.value = String(setting.slider);
     value.textContent = `${setting.speed.toFixed(1)}x`;
     group.classList.toggle('is-disabled', !setting.enabled);
   }
@@ -1289,18 +1539,14 @@ export class ChatSettingsFeature {
     this.syncBooleanSetting('hud-info-ping', setting.showPing);
     this.syncBooleanSetting('hud-info-boosters', setting.showBoosters);
     this.syncBooleanSetting('hud-booster-last-sec-flash', setting.boosterLastSecFlash);
-    this.syncHudModeSetting('hud-position', setting.positionMode, HUD_INFO_POSITION_MODES);
-    this.syncHudModeSetting('hud-layout', setting.layoutMode, HUD_INFO_LAYOUT_MODES);
-    this.syncHudModeSetting('hud-style', setting.styleMode, HUD_INFO_STYLE_MODES);
-    this.syncHudModeSetting('hud-fps-mode', setting.fpsMode, HUD_INFO_DATA_MODES);
-    this.syncHudModeSetting('hud-score-mode', setting.scoreMode, HUD_INFO_DATA_MODES);
-    this.syncHudModeSetting('hud-ping-mode', setting.pingMode, HUD_INFO_DATA_MODES);
-    this.syncHudModeSetting('hud-booster-name-mode', setting.boosterNameMode, HUD_INFO_BOOSTER_COLOR_MODES);
-    this.syncHudModeSetting(
-      'hud-booster-duration-mode',
-      setting.boosterDurationMode,
-      HUD_INFO_BOOSTER_DURATION_COLOR_MODES,
-    );
+    this.syncHudModeSetting('hud-position', setting.positionMode);
+    this.syncHudModeSetting('hud-layout', setting.layoutMode);
+    this.syncHudModeSetting('hud-style', setting.styleMode);
+    this.syncHudModeSetting('hud-fps-mode', setting.fpsMode);
+    this.syncHudModeSetting('hud-score-mode', setting.scoreMode);
+    this.syncHudModeSetting('hud-ping-mode', setting.pingMode);
+    this.syncHudModeSetting('hud-booster-name-mode', setting.boosterNameMode);
+    this.syncHudModeSetting('hud-booster-duration-mode', setting.boosterDurationMode);
 
     const flashGroup = this.root?.querySelector('[data-setting="hud-booster-last-sec-flash"]');
     flashGroup?.classList.toggle('is-hidden', setting.boosterDurationMode !== 'simple');
@@ -1313,42 +1559,22 @@ export class ChatSettingsFeature {
     const range = sizeGroup?.querySelector('.blobio-chat-font-range');
     const number = sizeGroup?.querySelector('.blobio-chat-font-number');
     if (range) {
-      range.value = String(setting.fontSize);
+      if (range.value !== String(setting.fontSize)) range.value = String(setting.fontSize);
     }
     if (number) {
       number.value = String(setting.fontSize);
     }
 
-    this.syncHudColorControls(setting);
-    this.syncHudBoosterColorControls('hud-booster-merge-color', setting.boosterMergeColor, setting.boosterMergeAlpha);
-    this.syncHudBoosterColorControls('hud-booster-speed-color', setting.boosterSpeedColor, setting.boosterSpeedAlpha);
-    this.syncHudBoosterColorControls('hud-booster-virus-color', setting.boosterVirusColor, setting.boosterVirusAlpha);
+    this.syncColorControls('hud-color', setting.color, setting.alpha);
+    this.syncColorControls('hud-booster-merge-color', setting.boosterMergeColor, setting.boosterMergeAlpha);
+    this.syncColorControls('hud-booster-speed-color', setting.boosterSpeedColor, setting.boosterSpeedAlpha);
+    this.syncColorControls('hud-booster-virus-color', setting.boosterVirusColor, setting.boosterVirusAlpha);
 
     const category = this.root?.querySelector('.blobio-chat-settings-category[data-category="hud-info"]');
     category?.classList.toggle('is-disabled', !setting.enabled);
   }
 
-  syncHudColorControls(setting) {
-    const colorGroup = this.root?.querySelector('[data-setting="hud-color"]');
-    const color = colorGroup?.querySelector('.blobio-ui-color-input');
-    const swatch = colorGroup?.querySelector('.blobio-ui-color-swatch');
-    const alpha = colorGroup?.querySelector('.blobio-ui-alpha-range');
-    const alphaValue = colorGroup?.querySelector('.blobio-ui-alpha-value');
-    if (color) {
-      color.value = setting.color;
-    }
-    if (swatch) {
-      swatch.style.backgroundColor = setting.color;
-    }
-    if (alpha) {
-      alpha.value = String(setting.alpha);
-    }
-    if (alphaValue) {
-      alphaValue.textContent = `${Math.round(setting.alpha * 100)}%`;
-    }
-  }
-
-  syncHudBoosterColorControls(name, colorValue, alphaValueNumber) {
+  syncColorControls(name, colorValue, alphaValueNumber) {
     const group = this.root?.querySelector(`[data-setting="${name}"]`);
     const color = group?.querySelector('.blobio-ui-color-input');
     const swatch = group?.querySelector('.blobio-ui-color-swatch');
@@ -1361,23 +1587,41 @@ export class ChatSettingsFeature {
       swatch.style.backgroundColor = colorValue;
     }
     if (alpha) {
-      alpha.value = String(alphaValueNumber);
+      if (alpha.value !== String(alphaValueNumber)) alpha.value = String(alphaValueNumber);
     }
     if (alphaValue) {
       alphaValue.textContent = `${Math.round(alphaValueNumber * 100)}%`;
     }
   }
 
-  syncHudModeSetting(name, value, options) {
-    const button = this.root?.querySelector(`[data-setting="${name}"] .blobio-hud-mode-button`);
-    if (!button) {
-      return;
+  syncModeButton(button, value, options) {
+    button.classList.add('blobio-plus-mode-button');
+    if (!button.children.length) {
+      button.textContent = '';
+      for (const [key, label] of options) {
+        const text = this.document.createElement('span');
+        text.dataset.mode = key;
+        text.textContent = label;
+        button.appendChild(text);
+      }
     }
-    button.textContent = hudInfoModeLabel(value, options);
+    const selected = Math.max(0, options.findIndex(([key]) => key === value));
+    button.style.setProperty('--blobio-mode-position', (selected / Math.max(1, options.length - 1) * 100) + '%');
+    for (const text of button.children) {
+      const active = text.dataset.mode === value;
+      text.classList.toggle('is-selected', active);
+      text.setAttribute('aria-hidden', String(!active));
+    }
     button.dataset.mode = value;
-    button.classList.toggle('is-advanced', value === 'advanced');
-    button.classList.toggle('is-dev', value === 'dev');
-    button.classList.toggle('is-individual', value === 'individual');
+  }
+
+  syncHudModeSetting(name, value) {
+    const buttons = this.root?.querySelectorAll(`[data-setting="${name}"] .blobio-hud-mode-choices button`);
+    for (const button of buttons || []) {
+      const selected = button.dataset.mode === value;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    }
   }
 
   syncFontSetting(name, setting) {
@@ -1390,7 +1634,7 @@ export class ChatSettingsFeature {
     const number = group.querySelector('.blobio-chat-font-number');
     toggle.textContent = setting.enabled ? 'true' : 'false';
     toggle.classList.toggle('is-enabled', setting.enabled);
-    range.value = String(setting.value);
+    if (range.value !== String(setting.value)) range.value = String(setting.value);
     range.disabled = !setting.enabled;
     number.value = String(setting.value);
     number.disabled = !setting.enabled;
@@ -1420,8 +1664,27 @@ export class ChatSettingsFeature {
     toggle.classList.toggle('is-enabled', setting.enabled);
     color.value = setting.color;
     swatch.style.backgroundColor = setting.color;
-    alpha.value = String(setting.alpha);
+    if (alpha.value !== String(setting.alpha)) alpha.value = String(setting.alpha);
     alphaValue.textContent = `${Math.round(setting.alpha * 100)}%`;
+    const glow = group.querySelector('.blobio-outline-glow-range');
+    if (glow) {
+      if (glow.value !== String(setting.glow)) glow.value = String(setting.glow);
+      group.querySelector('.blobio-outline-glow-value').textContent = `${Math.round(setting.glow * 100)}%`;
+    }
+    const mode = group.querySelector('.blobio-background-mode');
+    if (mode) {
+      this.syncModeButton(mode, setting.mode, [['rgb', 'rgb'], ['gradient', 'gradient']]);
+      const secondary = group.querySelector('.blobio-secondary-color');
+      secondary.value = setting.secondaryColor;
+      secondary.parentNode.querySelector('.blobio-ui-color-swatch').style.backgroundColor = setting.secondaryColor;
+      const angle = group.querySelector('.blobio-gradient-angle');
+      if (angle.value !== String(setting.angle)) angle.value = String(setting.angle);
+      group.querySelector('.blobio-gradient-value').textContent = setting.angle + '°';
+      const secondaryAlpha = group.querySelector('.blobio-secondary-alpha');
+      if (secondaryAlpha.value !== String(setting.secondaryAlpha)) secondaryAlpha.value = String(setting.secondaryAlpha);
+      group.querySelector('.blobio-secondary-alpha-value').textContent = `${Math.round(setting.secondaryAlpha * 100)}%`;
+      for (const control of group.querySelectorAll('.blobio-gradient-control')) control.hidden = setting.mode !== 'gradient';
+    }
     group.classList.toggle('is-disabled', !setting.enabled);
   }
 
@@ -1988,14 +2251,13 @@ export class ChatSettingsFeature {
     }
   }
 
-  applyChatFontSize() {
+  applyChatFontSize(size = getChatFontSize(this.storage)) {
     const chat = this.document.querySelector?.('#chat');
     if (!chat) {
       return;
     }
 
     const enabled = isChatFontSizeEnabled(this.storage);
-    const size = getChatFontSize(this.storage);
     chat.classList.toggle('blobio-chat-font-size-enabled', enabled);
     if (typeof chat.style?.setProperty === 'function') {
       chat.style.setProperty('--blobio-chat-font-size', `${size}px`);
@@ -2172,6 +2434,11 @@ export class ChatSettingsFeature {
   }
 
   destroy() {
+    this.document.defaultView?.removeEventListener('blobio-keystroke-editor-change', this.keystrokeEditorHandler);
+    this.stopInGameTasks();
+    for (const drag of this.settingDrags) drag.flush();
+    this.settingDrags = [];
+    this.hudDrag.flush();
     this.pageObserver?.disconnect();
     this.pageObserver = null;
     this.resizeObserver?.disconnect();
@@ -2233,8 +2500,6 @@ export class ChatSettingsFeature {
       win.cancelAnimationFrame?.(this.positionFrame);
       this.positionFrame = null;
     }
-    this.clearHudColorCommitTimer();
-    this.clearHudColorPreviewFrame();
 
     this.document.querySelector?.('#chat')?.classList?.remove('blobio-chat-font-size-enabled');
     win.__blobioAnimationSpeedRefresh?.({ enabled: false, speed: 1 });

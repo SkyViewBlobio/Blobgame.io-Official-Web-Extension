@@ -7,6 +7,7 @@ export function migrateLegacySettingsCookies(document, storage) {
     blobioVirusPelletColors: 'blobio.settings.virusPelletColors.snapshot',
   };
   const result = { migrated: 0, removed: 0, failed: 0 };
+  const configApplied = storage?.getItem?.('blobio.settings.configApplied') === '1';
   let cookies;
   try {
     cookies = String(document?.cookie || '').split(';').map(entry => entry.trim());
@@ -25,7 +26,7 @@ export function migrateLegacySettingsCookies(document, storage) {
         let raw;
         try { raw = decodeURIComponent(entry.slice(name.length + 1)); } catch { continue; }
         const candidate = parseSnapshot(raw);
-        if (candidate && (!selected || candidate.updatedAt > selected.updatedAt)) {
+        if (!configApplied && candidate && (!selected || candidate.updatedAt > selected.updatedAt)) {
           selected = candidate;
           selectedRaw = raw;
         }

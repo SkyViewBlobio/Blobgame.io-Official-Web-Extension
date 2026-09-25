@@ -1,3 +1,5 @@
+import { TASK_COMPLETED_CSS } from './TaskCompletedStyles.js';
+
 export const CHAT_SETTINGS_STYLE_ID = 'blobio-chat-settings-style';
 
 export const CHAT_SETTINGS_CSS = `
@@ -94,7 +96,7 @@ export const CHAT_SETTINGS_CSS = `
   z-index: 0;
   background: linear-gradient(135deg, rgba(18, 104, 47, 0.9), rgba(47, 226, 101, 0.28) 58%, rgba(7, 43, 22, 0.82));
   opacity: 0;
-  transition: opacity 340ms ease;
+  transition: opacity 300ms ease;
   pointer-events: none;
 }
 
@@ -110,6 +112,56 @@ export const CHAT_SETTINGS_CSS = `
 
 .blobio-chat-settings-category-button.has-active-setting::before {
   opacity: 1;
+}
+
+.blobio-chat-settings-category-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(110deg, rgba(65, 235, 110, .52), rgba(69, 237, 116, .24) 60%, transparent);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.blobio-chat-settings-category-button:hover::after {
+  opacity: 1;
+}
+
+.blobio-ui-setting-group,
+.blobio-chat-font-label,
+.blobio-hotkey-row {
+  position: relative;
+  isolation: isolate;
+}
+
+.blobio-ui-setting-group::after,
+.blobio-chat-font-label::after,
+.blobio-hotkey-row::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(110deg, rgba(26, 141, 62, .48), rgba(69, 237, 116, .16) 60%, transparent);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.blobio-ui-setting-group:hover::after,
+.blobio-chat-font-label:hover::after,
+.blobio-hotkey-row:hover::after {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blobio-chat-settings-category-button::after,
+  .blobio-ui-setting-group::after,
+  .blobio-chat-font-label::after,
+  .blobio-hotkey-row::after { transition: none; }
 }
 
 .blobio-chat-settings-category {
@@ -131,7 +183,7 @@ export const CHAT_SETTINGS_CSS = `
   visibility: hidden;
   pointer-events: none;
   transform: translateX(-6px);
-  transition: opacity 240ms ease, transform 280ms ease, visibility 0s linear 280ms;
+  transition: opacity 456ms ease, transform 456ms cubic-bezier(.22,.61,.36,1), visibility 0s linear 456ms;
 }
 
 .blobio-chat-settings-root.is-open .blobio-chat-settings-category.is-open {
@@ -659,6 +711,21 @@ export const CHAT_SETTINGS_CSS = `
 
 .blobio-chat-appearance-category,
 .blobio-leaderboard-category,
+.blobio-minimap-category { display: block; }
+.blobio-background-modes { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.blobio-background-modes .blobio-hud-mode-button { width: 112px; flex: 0 0 112px; }
+.blobio-background-modes .blobio-gradient-angle { width: 100%; min-width: 0; }
+.blobio-background-modes .blobio-ui-color-wheel { flex-shrink: 0; }
+.blobio-gradient-control[hidden] { display: none !important; }
+.blobio-gradient-value { min-width: 32px; font-size: 11px; }
+.blobio-keystroke-category {
+  display: block;
+}
+
+.blobio-keystroke-category .blobio-hud-color-setting {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .blobio-hud-info-category {
   display: block;
 }
@@ -711,11 +778,70 @@ export const CHAT_SETTINGS_CSS = `
 }
 
 .blobio-hud-info-category .blobio-hud-mode-setting {
-  grid-template-columns: minmax(112px, 1fr) minmax(116px, 1fr);
+  grid-template-columns: minmax(108px, 0.72fr) minmax(0, 1.28fr);
 }
 
 .blobio-hud-info-category .blobio-hud-mode-setting .blobio-chat-font-label {
   justify-content: center;
+}
+
+.blobio-hud-info-category .blobio-hud-mode-setting[data-setting="hud-position"] {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.blobio-hud-mode-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid rgba(147, 255, 177, 0.56);
+  border-radius: 999px;
+  background: rgba(0, 18, 10, 0.82);
+  box-shadow: inset 0 0 9px rgba(79, 255, 130, 0.12), 0 0 9px rgba(79, 255, 130, 0.2);
+}
+
+.blobio-hud-mode-choices[data-count="3"],
+.blobio-hud-mode-choices[data-count="6"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.blobio-hud-mode-choices[data-count="6"] {
+  border-radius: 12px;
+}
+
+.blobio-hud-mode-choices button {
+  appearance: none;
+  min-width: 0;
+  min-height: 26px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #c8f5d4;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.15;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.blobio-hud-mode-choices[data-count="6"] button {
+  border-radius: 8px;
+}
+
+.blobio-hud-mode-choices button.is-selected {
+  background: linear-gradient(145deg, #baffca, #35c968);
+  color: #06331d;
+  box-shadow: 0 0 8px rgba(79, 255, 130, 0.42);
+}
+
+.blobio-hud-mode-choices button:hover:not(.is-selected),
+.blobio-hud-mode-choices button:focus-visible:not(.is-selected) {
+  background: rgba(100, 232, 133, 0.17);
+  outline: none;
 }
 
 .blobio-hud-info-category .blobio-hud-size-setting,
@@ -919,20 +1045,6 @@ export const CHAT_SETTINGS_CSS = `
   box-shadow: inset 0 0 9px rgba(79, 255, 130, 0.18), 0 0 15px rgba(79, 255, 130, 0.52);
 }
 
-.blobio-hud-mode-button[data-mode="advanced"] {
-  border-color: rgba(255, 224, 95, 0.86);
-  background: rgba(58, 45, 4, 0.9);
-  color: #fff1a6;
-  box-shadow: inset 0 0 8px rgba(255, 217, 76, 0.16), 0 0 10px rgba(255, 217, 76, 0.22);
-}
-
-.blobio-hud-mode-button[data-mode="dev"] {
-  border-color: rgba(255, 109, 109, 0.84);
-  background: rgba(62, 8, 8, 0.9);
-  color: #ffd1d1;
-  box-shadow: inset 0 0 8px rgba(255, 82, 82, 0.16), 0 0 10px rgba(255, 82, 82, 0.24);
-}
-
 .blobio-hud-size-setting,
 .blobio-hud-color-setting {
   grid-template-columns: minmax(0, 1fr);
@@ -994,15 +1106,87 @@ export const CHAT_SETTINGS_CSS = `
   cursor: not-allowed;
 }
 
+#chat-wrapper.blobio-chat-background-wrapper {
+  background: var(--blobio-chat-background) !important;
+}
+
+#chat-wrapper.blobio-chat-blur-enabled,
+#chat.blobio-chat-blur-enabled {
+  backdrop-filter: blur(var(--blobio-chat-blur, 8px));
+}
+
+#leader-board-wrapper.blobio-leaderboard-blur-enabled {
+  backdrop-filter: blur(var(--blobio-leaderboard-blur, 8px));
+}
+
 #chat.blobio-chat-background-enabled {
   background: var(--blobio-chat-background) !important;
+}
+
+#chat-wrapper.blobio-chat-background-wrapper #chat {
+  background: transparent !important;
+}
+
+#chat.blobio-chat-slider-enabled {
+  scrollbar-color: var(--blobio-chat-slider) transparent !important;
+}
+
+#chat.blobio-chat-slider-enabled::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+#chat.blobio-chat-slider-enabled::-webkit-scrollbar-thumb {
+  background: var(--blobio-chat-slider) !important;
+  border-radius: 8px;
+}
+
+.blobio-outline-glow-controls,
+.blobio-gradient-alpha-controls {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+  color: #ecfff1;
+  font-size: 12px;
+  font-weight: 700;
+}
+.blobio-outline-glow-range,
+.blobio-secondary-alpha { width: 100%; min-width: 0; }
+.blobio-gradient-alpha-controls[hidden] { display: none; }
+
+.blobio-minimap-hud.blobio-gradient-outline,
+.blobio-gradient-outline {
+  border-width: 0 !important;
+  outline: none !important;
+  box-shadow: 0 0 14px var(--blobio-outline-glow) !important;
+}
+.blobio-gradient-outline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  padding: var(--blobio-outline-width, 1px);
+  border-radius: inherit;
+  background: var(--blobio-outline-gradient);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+#chat-wrapper.blobio-chat-outline-enabled.blobio-gradient-outline,
+#chat.blobio-chat-outline-enabled.blobio-gradient-outline,
+#leader-board-wrapper.blobio-leaderboard-outline-enabled.blobio-gradient-outline {
+  --blobio-outline-width: 2px;
+  border-width: 0 !important;
+  outline: none !important;
+  box-shadow: 0 0 14px var(--blobio-outline-glow) !important;
 }
 
 #chat-wrapper.blobio-chat-outline-enabled,
 #chat.blobio-chat-outline-enabled {
   border-color: var(--blobio-chat-outline) !important;
   outline: 1px solid var(--blobio-chat-outline) !important;
-  box-shadow: 0 0 14px var(--blobio-chat-outline) !important;
+  box-shadow: 0 0 14px var(--blobio-outline-glow) !important;
 }
 
 #leader-board-wrapper.blobio-leaderboard-background-enabled {
@@ -1016,7 +1200,50 @@ export const CHAT_SETTINGS_CSS = `
 #leader-board-wrapper.blobio-leaderboard-outline-enabled {
   border-color: var(--blobio-leaderboard-outline) !important;
   outline: 1px solid var(--blobio-leaderboard-outline) !important;
-  box-shadow: 0 0 14px var(--blobio-leaderboard-outline) !important;
+  box-shadow: 0 0 14px var(--blobio-outline-glow) !important;
+}
+
+.blobio-minimap-hud.blobio-custom-glow,
+#chat.blobio-custom-glow,
+#chat.blobio-chat-outline-enabled.blobio-custom-glow,
+#leader-board-wrapper.blobio-custom-glow,
+#leader-board-wrapper.blobio-leaderboard-outline-enabled.blobio-custom-glow,
+#leader-board-wrapper.blobio-custom-glow.blobio-leaderboard-custom-size {
+  overflow: visible !important;
+  isolation: isolate;
+  box-shadow: none !important;
+}
+#chat-wrapper.blobio-custom-glow,
+#chat-wrapper.blobio-chat-outline-enabled.blobio-custom-glow {
+  overflow: hidden !important;
+  isolation: isolate;
+  box-shadow: 0 0 14px var(--blobio-custom-glow-shadow) !important;
+}
+html.blobio-fps-saver-overlay-contain #chat-wrapper.blobio-custom-glow,
+html.blobio-fps-saver-overlay-contain #leader-board-wrapper.blobio-custom-glow {
+  contain: layout style;
+}
+.blobio-outline-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  filter: blur(7px);
+  z-index: 0;
+  pointer-events: none;
+}
+#chat-wrapper.blobio-custom-glow > .blobio-outline-glow,
+#leader-board-wrapper.blobio-custom-glow > .blobio-outline-glow {
+  filter: blur(14px);
+}
+.blobio-outline-glow::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  padding: 4px;
+  border-radius: inherit;
+  background: var(--blobio-glow-fill);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
 }
 
 #leader-board-wrapper.blobio-leaderboard-font-size-enabled li {
@@ -1078,11 +1305,11 @@ export const CHAT_SETTINGS_CSS = `
   width: 18px;
   height: 18px;
   padding: 0;
-  border: 1px solid rgba(142, 255, 174, 0.78);
+  border: 0;
   border-radius: 0 7px 0 7px;
   outline: none;
-  background: rgba(0, 20, 10, 0.88);
-  box-shadow: 0 0 9px rgba(79, 255, 130, 0.36), inset 0 0 7px rgba(79, 255, 130, 0.16);
+  background: transparent;
+  box-shadow: none;
   cursor: nesw-resize;
   touch-action: none;
   user-select: none;
@@ -1091,8 +1318,8 @@ export const CHAT_SETTINGS_CSS = `
 .blobio-leaderboard-resize-handle:hover,
 .blobio-leaderboard-resize-handle:focus-visible,
 #leader-board-wrapper.blobio-leaderboard-is-resizing .blobio-leaderboard-resize-handle {
-  border-color: rgba(196, 255, 211, 0.98);
-  box-shadow: 0 0 13px rgba(79, 255, 130, 0.62), inset 0 0 8px rgba(79, 255, 130, 0.24);
+  background: transparent;
+  box-shadow: none;
 }
 
 .blobio-leaderboard-resize-grip {
@@ -1100,8 +1327,8 @@ export const CHAT_SETTINGS_CSS = `
   height: 9px;
   pointer-events: none;
   background:
-    linear-gradient(135deg, transparent 42%, rgba(205, 255, 217, 0.92) 43% 52%, transparent 53%) 0 0 / 5px 5px;
-  filter: drop-shadow(0 0 3px rgba(79, 255, 130, 0.78));
+    linear-gradient(135deg, transparent 42%, rgba(160, 160, 160, 0.85) 43% 52%, transparent 53%) 0 0 / 5px 5px;
+  filter: none;
 }
 
 .rc-anchor-logo-img.blobio-captcha-logo-hidden,
@@ -1179,4 +1406,157 @@ iframe.blobio-captcha-anchor-hidden,
   }
 
 }
+.blobio-chat-settings-root .blobio-plus-mode-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 30px;
+  margin-bottom: 10px;
+  padding: 3px 4px;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid rgba(147, 255, 177, 0.58);
+  border-radius: 999px;
+  background: rgba(0, 18, 10, 0.82);
+  color: #c8f5d4;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: inset 0 0 9px rgba(79, 255, 130, 0.12), 0 0 9px rgba(79, 255, 130, 0.2);
+}
+
+.blobio-chat-settings-root .blobio-plus-mode-button::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  width: calc((100% - 8px) / 2);
+  height: 22px;
+  border-radius: 999px;
+  background: linear-gradient(145deg, #baffca, #35c968);
+  box-shadow: 0 0 9px rgba(79, 255, 130, 0.56);
+  transition: transform 180ms ease;
+}
+
+.blobio-chat-settings-root .blobio-plus-mode-button.is-tasks::before {
+  transform: translateX(100%);
+}
+
+.blobio-chat-settings-root .blobio-plus-mode-button > span {
+  position: relative;
+  z-index: 1;
+  width: 50%;
+  text-align: center;
+}
+
+.blobio-chat-settings-root .blobio-plus-mode-button:not(.is-tasks) > span:first-child,
+.blobio-chat-settings-root .blobio-plus-mode-button.is-tasks > span:last-child {
+  color: #06331d;
+}
+
+.blobio-chat-settings-panel.is-tasks .blobio-plus-settings-list,
+.blobio-plus-tasks-view {
+  display: none;
+}
+
+.blobio-chat-settings-panel.is-tasks .blobio-plus-tasks-view {
+  display: grid;
+  gap: 8px;
+  color: #eaffee;
+  font-size: 12px;
+}
+
+.blobio-chat-settings-panel:not(.is-tasks) .blobio-plus-settings-list,
+.blobio-chat-settings-panel.is-tasks .blobio-plus-tasks-view {
+  animation: blobio-plus-view-enter 220ms ease-out;
+}
+
+@keyframes blobio-plus-view-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.blobio-plus-tasks-reset {
+  color: #c4ffdc;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.blobio-plus-task {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid rgba(59, 194, 109, 0.62);
+  border-radius: 7px;
+  background: linear-gradient(135deg, rgba(5, 75, 48, 0.87), rgba(0, 42, 29, 0.93));
+  box-shadow: inset 0 0 12px rgba(74, 220, 136, 0.07);
+}
+
+.blobio-plus-task.is-complete {
+  border-color: rgba(102, 232, 145, 0.78);
+  background: linear-gradient(135deg, rgba(11, 103, 62, 0.92), rgba(0, 59, 39, 0.94));
+}
+
+.blobio-plus-task-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.blobio-plus-task-objective {
+  min-width: 0;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+.blobio-plus-task-reward {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  color: #ffe38a;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.blobio-plus-task-reward img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.blobio-plus-task-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 20, 12, 0.8);
+  box-shadow: inset 0 0 0 1px rgba(101, 245, 143, 0.22);
+}
+
+.blobio-plus-task-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #55e88b, #9bffd0 55%, #5bffa3);
+  box-shadow: 0 0 8px rgba(91, 255, 163, 0.55);
+}
+
+.blobio-plus-task-count {
+  color: #c7f5d9;
+  font-size: 11px;
+  text-align: right;
+}
+
+${TASK_COMPLETED_CSS}
+
+@media (prefers-reduced-motion: reduce) {
+  .blobio-chat-settings-root .blobio-plus-mode-button::before { transition: none; }
+  .blobio-chat-settings-panel:not(.is-tasks) .blobio-plus-settings-list,
+  .blobio-chat-settings-panel.is-tasks .blobio-plus-tasks-view { animation: none; }
+}
+
 `;

@@ -1,4 +1,10 @@
-const SHARED_KEY_PREFIXES = ['blobio.roles.', 'blobio.settings.', 'blobio.chat.'];
+const SHARED_KEY_PREFIXES = [
+  'blobio.roles.', 'blobio.settings.', 'blobio.chat.', 'blobio.controls.', 'blobio.emoteSkin.',
+];
+const CONFIG_APPLIED_KEY = 'blobio.settings.configApplied';
+const ROLE_CACHE_KEYS = new Set([
+  'blobio.roles.vipCache', 'blobio.roles.adminCache', 'blobio.roles.clanCache',
+]);
 const STORAGE_BRIDGE_SOURCE = 'BlobioExtensionStorageBridge';
 
 
@@ -94,7 +100,19 @@ export function createBlobioStorage(document = globalThis.document) {
         }
       }
 
-      return localStorage?.getItem?.(key) ?? null;
+      if (isSharedKey(key) && key !== CONFIG_APPLIED_KEY && !ROLE_CACHE_KEYS.has(key)) {
+        const applied = bridge?.getItem?.(CONFIG_APPLIED_KEY)
+          ?? gmApi.getValue?.(CONFIG_APPLIED_KEY, undefined);
+        if (applied === '1') return null;
+      }
+
+      const localValue = localStorage?.getItem?.(key) ?? null;
+      if (localValue !== null && (String(key).startsWith('blobio.controls.')
+        || String(key).startsWith('blobio.emoteSkin.'))) {
+        if (typeof bridge?.setItem === 'function') bridge.setItem(key, localValue);
+        else gmApi.setValue?.(key, localValue);
+      }
+      return localValue;
     },
 
     setItem(key, value) {

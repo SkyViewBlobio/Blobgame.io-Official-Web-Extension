@@ -29,11 +29,16 @@ html.${className} app-settings.blobio-extension-settings-active .body {
   align-items: stretch !important;
 }
 
+html.${className} app-settings.blobio-extension-settings-active .left {
+  flex: 0 0 31% !important;
+}
+
 html.${className} app-settings.blobio-extension-settings-active .right {
   display: flex !important;
   flex: 1 1 auto !important;
   flex-direction: column !important;
   align-self: stretch !important;
+  min-width: 0 !important;
   min-height: 0 !important;
 }
 
@@ -57,6 +62,7 @@ html.${className} app-settings.blobio-extension-settings-active .content-contain
   height: auto !important;
   max-height: 100% !important;
   overflow-y: auto !important;
+  scrollbar-gutter: stable;
   overflow-x: hidden !important;
   box-sizing: border-box !important;
 }
@@ -130,6 +136,7 @@ html.${className} app-settings .blobio-extension-category-button {
   text-shadow: 0 0 6px rgba(118, 255, 154, 0.5);
   box-shadow: inset 0 0 8px rgba(79, 255, 130, 0.08);
   cursor: pointer;
+  transition: background-color 300ms ease, border-color 300ms ease, color 300ms ease, box-shadow 300ms ease;
 }
 
 html.${className} app-settings .blobio-extension-category-button:hover,
@@ -154,12 +161,27 @@ html.${className} app-settings .blobio-extension-category-panel {
   min-height: 0;
   padding: 7px 8px 10px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overflow-x: hidden;
   box-sizing: border-box;
 }
 
 html.${className} app-settings .blobio-extension-category-panel.is-active {
   display: grid;
+}
+
+html.${className} app-settings.blobio-extension-settings-active .blobio-extension-category-panel.is-active > * {
+  animation: blobio-extension-category-enter 300ms cubic-bezier(.4, 0, .2, 1);
+}
+
+@keyframes blobio-extension-category-enter {
+  from {
+    opacity: 0.55;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 html.${className} app-settings .blobio-extension-category-panel[hidden] {
@@ -208,7 +230,9 @@ html.${className} app-settings .blobio-admin-only-setting-row.is-hidden {
   display: none !important;
 }
 
-html.${className} app-settings .blobio-extension-clan-text-group {
+html.${className} app-settings .blobio-watermark-setting-group,
+html.${className} app-settings .blobio-extension-clan-text-group,
+html.${className} app-settings .blobio-config-manager-group {
   display: grid;
   grid-column: 1 / -1;
   gap: 8px;
@@ -217,6 +241,57 @@ html.${className} app-settings .blobio-extension-clan-text-group {
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+html.${className} app-settings .blobio-extension-setting-row,
+html.${className} app-settings .blobio-extension-category-button {
+  position: relative;
+  isolation: isolate;
+}
+
+html.${className} app-settings .blobio-extension-setting-row::after,
+html.${className} app-settings .blobio-extension-category-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(110deg, rgba(26, 141, 62, .48), rgba(69, 237, 116, .16) 60%, transparent);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+html.${className} app-settings .blobio-extension-setting-row:hover::after,
+html.${className} app-settings .blobio-extension-category-button:hover::after {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.${className} app-settings.blobio-extension-settings-active .blobio-extension-category-panel.is-active > * { animation: none; }
+  html.${className} app-settings .blobio-extension-setting-row::after,
+  html.${className} app-settings .blobio-extension-category-button::after { transition: none; }
+}
+
+html.${className} app-settings .blobio-watermark-controls {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+html.${className} app-settings .blobio-watermark-controls[hidden] {
+  display: none !important;
+}
+
+html.${className} app-settings .blobio-watermark-preview {
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  box-sizing: border-box;
+  text-align: center;
+  overflow-wrap: anywhere;
+  font-size: 10.56px;
+  font-weight: 800;
 }
 
 html.${className} app-settings .blobio-extension-clan-text-group > .blobio-extension-setting-row {
@@ -314,6 +389,51 @@ html.${className} app-settings .blobio-clan-text-button-menu.is-disabled {
 
 html.${className} app-settings .blobio-clan-text-button-menu.is-disabled .blobio-clan-text-checkbox-row {
   filter: saturate(0.7);
+}
+
+html.${className} app-settings .blobio-config-manager-main-row {
+  grid-template-columns: minmax(0, 1fr) 34px;
+}
+
+html.${className} app-settings .blobio-config-manager-menu {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+html.${className} app-settings .blobio-config-manager-action {
+  min-width: 0;
+  padding: 10px 6px;
+  border: 1px solid rgba(142, 255, 174, 0.5);
+  border-radius: 6px;
+  background: rgba(8, 58, 32, 0.82);
+  color: #e4ffeb;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+html.${className} app-settings .blobio-config-manager-action:hover,
+html.${className} app-settings .blobio-config-manager-action:focus-visible {
+  border-color: #c5ffd2;
+  background: rgba(23, 96, 48, 0.9);
+  box-shadow: 0 0 12px rgba(79, 255, 130, 0.24);
+}
+
+html.${className} app-settings .blobio-config-manager-status {
+  grid-column: 1 / -1;
+  color: #dfffe6;
+  font-size: 12px;
+}
+
+html.${className} app-settings .blobio-config-manager-status:empty,
+html.${className} app-settings .blobio-config-manager-menu input[hidden] {
+  display: none !important;
+}
+
+html.${className} app-settings .blobio-friend-minimap-controls {
+  display: grid;
+  gap: 10px;
+  padding-top: 3px;
 }
 
 html.${className} app-settings .blobio-jelly-setting-group {
@@ -533,7 +653,6 @@ html.${className} app-settings .blobio-cell-mass-checkbox-row input {
   accent-color: rgb(74, 229, 111);
 }
 
-html.${className} app-settings .blobio-cell-mass-mode-row,
 html.${className} app-settings .blobio-cell-mass-slider-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(110px, 1.2fr) 54px;
@@ -543,94 +662,6 @@ html.${className} app-settings .blobio-cell-mass-slider-row {
   color: #dfffe6;
   font-size: 12px;
   font-weight: 800;
-}
-
-html.${className} app-settings .blobio-cell-mass-mode-row {
-  grid-template-columns: minmax(0, 1fr) 156px;
-}
-
-html.${className} app-settings .blobio-cell-mass-preset-mode-button {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: center;
-  height: 30px;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid rgba(147, 255, 177, 0.58);
-  border-radius: 999px;
-  background: rgba(0, 18, 10, 0.82);
-  color: #ecfff1;
-  font: inherit;
-  cursor: pointer;
-  box-shadow: inset 0 0 9px rgba(79, 255, 130, 0.12), 0 0 9px rgba(79, 255, 130, 0.2);
-}
-
-html.${className} app-settings .blobio-cell-mass-preset-mode-button::before {
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 3px;
-  width: calc((100% - 6px) / 3);
-  content: "";
-  border-radius: 999px;
-  background: linear-gradient(145deg, rgba(184, 255, 202, 0.96), rgba(47, 198, 94, 0.92));
-  box-shadow: 0 0 9px rgba(79, 255, 130, 0.5), inset 0 0 7px rgba(255, 255, 255, 0.28);
-  transform: translateX(0);
-  transition: transform 180ms ease;
-}
-
-html.${className} app-settings .blobio-cell-mass-preset-mode-button.is-vip::before {
-  transform: translateX(100%);
-}
-
-html.${className} app-settings .blobio-cell-mass-preset-mode-button.is-custom::before {
-  transform: translateX(200%);
-}
-
-html.${className} app-settings .blobio-cell-mass-preset-mode-text {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  height: 100%;
-  padding: 0 6px;
-  color: rgba(236, 255, 241, 0.74);
-  font-size: 11px;
-  line-height: 1;
-  text-align: center;
-  transition: color 180ms ease, text-shadow 180ms ease;
-  pointer-events: none;
-}
-
-html.${className} app-settings .blobio-cell-mass-setting-group .blobio-cell-mass-mode-row {
-  grid-template-columns: minmax(0, 1fr) 220px;
-}
-
-html.${className} app-settings .blobio-cell-mass-setting-group .blobio-cell-mass-preset-mode-button {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-html.${className} app-settings .blobio-cell-mass-setting-group .blobio-cell-mass-preset-mode-button::before {
-  width: calc((100% - 6px) / 4);
-}
-
-html.${className} app-settings .blobio-cell-mass-preset-mode-button.is-dynamic::before {
-  transform: translateX(300%);
-}
-
-html.${className} app-settings .blobio-cell-mass-preset-mode-button.is-dynamic .blobio-cell-mass-preset-mode-text.is-dynamic {
-  color: #06210f;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.38);
-}
-
-html.${className} app-settings .blobio-cell-mass-preset-mode-button.is-normal .blobio-cell-mass-preset-mode-text.is-normal,
-html.${className} app-settings .blobio-cell-mass-preset-mode-button.is-vip .blobio-cell-mass-preset-mode-text.is-vip,
-html.${className} app-settings .blobio-cell-mass-preset-mode-button.is-custom .blobio-cell-mass-preset-mode-text.is-custom {
-  color: #06210f;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.38);
 }
 
 html.${className} app-settings .blobio-cell-mass-slider-input {
@@ -1446,6 +1477,10 @@ html.${className} app-settings .blobio-cell-ring-control {
   font-weight: 800;
 }
 
+html.${className} app-settings .blobio-cell-ring-outline-color-control[hidden] {
+  display: none;
+}
+
 html.${className} app-settings .blobio-cell-ring-solid-panel {
   display: grid;
   gap: 8px;
@@ -1462,16 +1497,55 @@ html.${className} app-settings .blobio-cell-ring-solid-panel[hidden] {
 }
 
 html.${className} app-settings .blobio-cell-ring-mode-button {
+  position: relative;
+  display: grid;
+  align-items: center;
   width: 156px;
+  height: 30px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(147, 255, 177, 0.58);
+  border-radius: 999px;
+  background: rgba(0, 18, 10, 0.82);
+  color: #ecfff1;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: inset 0 0 9px rgba(79, 255, 130, 0.12), 0 0 9px rgba(79, 255, 130, 0.2);
 }
 
 html.${className} app-settings .blobio-cell-ring-mode-button::before {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
   width: calc((100% - 6px) / 2);
+  content: "";
+  border-radius: 999px;
+  background: linear-gradient(145deg, rgba(184, 255, 202, 0.96), rgba(47, 198, 94, 0.92));
+  box-shadow: 0 0 9px rgba(79, 255, 130, 0.5), inset 0 0 7px rgba(255, 255, 255, 0.28);
+  transition: transform 180ms ease;
 }
 
 html.${className} app-settings .blobio-cell-ring-mode-button.is-solid::before {
   transform: translateX(100%);
+}
+
+html.${className} app-settings .blobio-cell-ring-mode-text {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0 6px;
+  color: rgba(236, 255, 241, 0.74);
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  transition: color 180ms ease, text-shadow 180ms ease;
+  pointer-events: none;
 }
 
 html.${className} app-settings .blobio-cell-ring-mode-button.is-sync .blobio-cell-ring-mode-text.is-sync,
@@ -1518,6 +1592,7 @@ html.${className} app-settings .blobio-cell-ring-range-row {
 }
 
 html.${className} app-settings .blobio-cell-ring-alpha-input,
+html.${className} app-settings .blobio-cell-ring-outline-alpha-input,
 html.${className} app-settings .blobio-cell-ring-size-input,
 html.${className} app-settings .blobio-cell-ring-border-width-input,
 html.${className} app-settings .blobio-cell-ring-cell-alpha-input {
@@ -2426,6 +2501,39 @@ html.${className} .blobio-watermark-extension::after {
   10% {
     text-shadow: 0 0 12px rgba(220, 255, 228, 1), 0 0 28px rgba(99, 255, 142, 0.82);
   }
+}
+
+html.${className} app-settings .blobio-has-cogwheel .blobio-extension-setting-row > button[aria-expanded],
+html.${className} app-settings .blobio-has-cogwheel .blobio-extension-setting-row > button[aria-expanded]:hover {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: transparent;
+  font-size: 0;
+  text-shadow: none;
+}
+
+html.${className} app-settings .blobio-has-cogwheel .blobio-extension-setting-row > button[aria-expanded]:focus-visible {
+  outline: 2px solid rgba(151, 255, 181, 0.96);
+  outline-offset: 2px;
+}
+
+html.${className} app-settings .blobio-has-cogwheel .blobio-extension-setting-row > button[aria-expanded] > span[class$="-dropdown-symbol"] {
+  display: none;
+}
+
+html.${className} app-settings .blobio-has-cogwheel .blobio-extension-setting-row > button[aria-expanded] > .blobio-cogwheel-icon {
+  position: absolute;
+  inset: 1px;
+  background: var(--blobio-cogwheel-icon) center / contain no-repeat;
+  filter: brightness(0) invert(1);
+  transform: rotate(0deg);
+  transition: filter 800ms ease;
+  pointer-events: none;
+}
+
+html.${className} app-settings .blobio-has-cogwheel .blobio-extension-setting-row > button[aria-expanded="true"] > .blobio-cogwheel-icon {
+  filter: brightness(0) invert(1) drop-shadow(0 0 3px rgba(82, 255, 134, .9)) drop-shadow(0 0 8px rgba(82, 255, 134, .6));
 }
 `;
 }

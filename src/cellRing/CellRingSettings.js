@@ -5,9 +5,12 @@ export const CELL_RING_KEYS = {
   alpha: 'blobio.settings.cellRing.alpha',
   glowSize: 'blobio.settings.cellRing.glowSize',
   borderWidth: 'blobio.settings.cellRing.borderWidth',
+  outlineColor: 'blobio.settings.cellRing.outline.color',
+  outlineAlpha: 'blobio.settings.cellRing.outline.alpha',
   transparentCell: 'blobio.settings.cellRing.transparentCell.enabled',
   cellAlpha: 'blobio.settings.cellRing.transparentCell.alpha',
   nameStyle: 'blobio.settings.cellRing.preview.nameStyle',
+  removeOwnCellBorder: 'blobio.settings.cellRing.removeOwnCellBorder',
   removeAllCellBorders: 'blobio.settings.cellRing.removeAllCellBorders',
   // Old keys kept only so older saved state can be migrated cleanly.
   sideGlowMode: 'blobio.settings.cellRing.sideGlow.mode',
@@ -22,15 +25,18 @@ export const CELL_RING_MODES = ['sync', 'solid'];
 export const CELL_RING_NAME_STYLES = ['normal', 'vip', 'yt'];
 
 export const DEFAULT_CELL_RING_SETTINGS = Object.freeze({
-  enabled: true,
+  enabled: false,
   mode: 'sync',
   solidColor: '#19e6ff',
   alpha: 0.72,
   glowSize: 1,
   borderWidth: 1,
+  outlineColor: null,
+  outlineAlpha: null,
   transparentCell: false,
   cellAlpha: 0.75,
   nameStyle: 'normal',
+  removeOwnCellBorder: false,
   removeAllCellBorders: false,
 });
 
@@ -50,9 +56,12 @@ export function readCellRingSettings(storage, document = globalThis.document) {
     alpha: storage?.getItem?.(CELL_RING_KEYS.alpha) ?? storage?.getItem?.(CELL_RING_KEYS.sideGlowAlpha),
     glowSize: storage?.getItem?.(CELL_RING_KEYS.glowSize),
     borderWidth: storage?.getItem?.(CELL_RING_KEYS.borderWidth),
+    outlineColor: storage?.getItem?.(CELL_RING_KEYS.outlineColor),
+    outlineAlpha: storage?.getItem?.(CELL_RING_KEYS.outlineAlpha),
     transparentCell: readBoolean(storage, CELL_RING_KEYS.transparentCell, DEFAULT_CELL_RING_SETTINGS.transparentCell),
     cellAlpha: storage?.getItem?.(CELL_RING_KEYS.cellAlpha),
     nameStyle: storage?.getItem?.(CELL_RING_KEYS.nameStyle),
+    removeOwnCellBorder: readBoolean(storage, CELL_RING_KEYS.removeOwnCellBorder, DEFAULT_CELL_RING_SETTINGS.removeOwnCellBorder),
     removeAllCellBorders: readBoolean(
       storage,
       CELL_RING_KEYS.removeAllCellBorders,
@@ -75,9 +84,12 @@ export function saveCellRingSettings(storage, settings, document = globalThis.do
   storage?.setItem?.(CELL_RING_KEYS.alpha, String(clean.alpha));
   storage?.setItem?.(CELL_RING_KEYS.glowSize, String(clean.glowSize));
   storage?.setItem?.(CELL_RING_KEYS.borderWidth, String(clean.borderWidth));
+  storage?.setItem?.(CELL_RING_KEYS.outlineColor, clean.outlineColor || '');
+  storage?.setItem?.(CELL_RING_KEYS.outlineAlpha, clean.outlineAlpha === null ? '' : String(clean.outlineAlpha));
   storage?.setItem?.(CELL_RING_KEYS.transparentCell, clean.transparentCell ? '1' : '0');
   storage?.setItem?.(CELL_RING_KEYS.cellAlpha, String(clean.cellAlpha));
   storage?.setItem?.(CELL_RING_KEYS.nameStyle, clean.nameStyle);
+  storage?.setItem?.(CELL_RING_KEYS.removeOwnCellBorder, clean.removeOwnCellBorder ? '1' : '0');
   storage?.setItem?.(CELL_RING_KEYS.removeAllCellBorders, clean.removeAllCellBorders ? '1' : '0');
 
   // Keep old loader/template keys in sync until every installed loader has refreshed.
@@ -142,11 +154,15 @@ export function normalizeCellRingSettings(settings = {}) {
     glowSize: normalizeGlowSize(settings.glowSize),
     borderWidth: settings.borderWidth === null || settings.borderWidth === undefined || settings.borderWidth === '' || !Number.isFinite(borderWidth)
       ? 1 : Math.max(0, Math.min(6, Math.round(borderWidth * 4) / 4)),
+    outlineColor: settings.outlineColor ? normalizeHexColor(settings.outlineColor, null) : null,
+    outlineAlpha: settings.outlineAlpha === null || settings.outlineAlpha === undefined || settings.outlineAlpha === ''
+      ? null : normalizeAlpha(settings.outlineAlpha, null),
     transparentCell: settings.transparentCell === undefined
       ? DEFAULT_CELL_RING_SETTINGS.transparentCell
       : Boolean(settings.transparentCell),
     cellAlpha: normalizeAlpha(settings.cellAlpha, DEFAULT_CELL_RING_SETTINGS.cellAlpha),
     nameStyle: normalizeNameStyle(settings.nameStyle),
+    removeOwnCellBorder: Boolean(settings.removeOwnCellBorder),
     removeAllCellBorders: Boolean(removeAllCellBorders),
   };
 }
@@ -183,10 +199,15 @@ export function normalizeAlpha(value, fallback = 1) {
   return Math.max(0, Math.min(1, Math.round(alpha * 100) / 100));
 }
 
-function chooseNewestSnapshot(...snapshots) {
-  return snapshots
-    .filter(Boolean)
-    .sort((left, right) => normalizeUpdatedAt(right.updatedAt) - normalizeUpdatedAt(left.updatedAt))[0] || null;
+function chooseNewestSnapshot(storedSnapshot, cookieSnapshot) {
+  if (!storedSnapshot) {
+    return cookieSnapshot;
+  }
+  if (!cookieSnapshot) {
+    return storedSnapshot;
+  }
+  return normalizeUpdatedAt(cookieSnapshot.updatedAt) > normalizeUpdatedAt(storedSnapshot.updatedAt)
+    ? cookieSnapshot : storedSnapshot;
 }
 
 function normalizeUpdatedAt(value) {

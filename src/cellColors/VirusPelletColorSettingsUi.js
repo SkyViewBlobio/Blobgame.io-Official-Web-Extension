@@ -1,5 +1,8 @@
+import { createSettingsDrag } from '../ui/SettingsDrag.js';
+import { animateDisclosure } from '../ui/animateDisclosure.js';
 import {
   colorToRgba,
+  normalizeVirusPelletColorSettings,
   readVirusPelletColorSettings,
   saveVirusPelletColorSettings,
 } from './VirusPelletColorSettings.js';
@@ -46,6 +49,13 @@ export class VirusPelletColorSettingsUi {
     this.onOpen = onOpen;
     this.pageWindow = pageWindow || this.resolvePageWindow();
     this.settings = readVirusPelletColorSettings(storage, document);
+    this.drag = createSettingsDrag(document.defaultView || globalThis,
+      () => {
+        this.sync();
+        this.refreshRuntime(this.settings);
+      },
+      () => { this.settings = saveVirusPelletColorSettings(this.storage, this.settings, this.document); },
+    );
     this.listeners = [];
     this.elements = null;
     this.previewImages = {
@@ -95,6 +105,7 @@ export class VirusPelletColorSettingsUi {
   }
 
   destroy() {
+    this.drag.flush();
     for (const [node, type, listener, options] of this.listeners) {
       node.removeEventListener?.(type, listener, options);
     }
@@ -264,9 +275,9 @@ export class VirusPelletColorSettingsUi {
     });
 
     this.listen(alphaInput, 'input', () => {
-      this.settings = this.saveTarget(target.key, { alpha: alphaInput.value });
-      this.sync();
+      this.scheduleTarget(target.key, { alpha: alphaInput.value });
     });
+    this.listen(alphaInput, 'change', () => this.drag.flush());
 
     return section;
   }
@@ -326,9 +337,9 @@ export class VirusPelletColorSettingsUi {
     row.append(label, colorWheel);
 
     this.listen(input, 'input', () => {
-      this.settings = this.saveTarget(target, this.colorChange(target, path, input.value));
-      this.sync();
+      this.scheduleTarget(target, this.colorChange(target, path, input.value));
     });
+    this.listen(input, 'change', () => this.drag.flush());
 
     return row;
   }
@@ -355,14 +366,14 @@ export class VirusPelletColorSettingsUi {
     row.append(title, input, value);
 
     this.listen(input, 'input', () => {
-      this.settings = this.saveTarget(target, {
+      this.scheduleTarget(target, {
         gradient: {
           ...this.settings[target].gradient,
           angle: input.value,
         },
       });
-      this.sync();
     });
+    this.listen(input, 'change', () => this.drag.flush());
 
     return row;
   }
@@ -397,7 +408,20 @@ export class VirusPelletColorSettingsUi {
     this.listen(node, 'mouseleave', () => this.hideTooltip?.());
   }
 
+  scheduleTarget(target, changes) {
+    this.scheduleSave({
+      [target]: { ...this.settings[target], ...changes,
+        gradient: { ...this.settings[target].gradient, ...(changes.gradient || {}) } },
+    });
+  }
+
+  scheduleSave(changes) {
+    this.settings = normalizeVirusPelletColorSettings({ ...this.settings, ...changes });
+    this.drag.schedule();
+  }
+
   save(changes) {
+    this.drag.flush();
     const saved = saveVirusPelletColorSettings(this.storage, {
       ...this.settings,
       ...changes,
@@ -471,11 +495,12 @@ export class VirusPelletColorSettingsUi {
   }
 
   setOpen(open) {
+    if (!open) this.drag.flush();
     if (!this.elements) {
       return;
     }
 
-    this.elements.menu.hidden = !open;
+    animateDisclosure(this.elements.menu, open);
     this.elements.arrowButton.setAttribute('aria-expanded', String(open));
     this.elements.disclosure.textContent = open ? '-' : '+';
     this.setClass(this.elements.group, 'is-open', open);

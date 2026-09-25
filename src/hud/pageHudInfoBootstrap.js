@@ -5,7 +5,7 @@ const HUD_INFO_PING_PROBE_TIMEOUT_MS = 2500;
 const HUD_INFO_PING_STALE_MS = 9000;
 const HUD_INFO_MAX_SAMPLES = 240;
 const HUD_INFO_BOOSTER_GAME_STALE_MS = 1200;
-const HUD_INFO_RUNTIME_VERSION = '0.2.89.1';
+const HUD_INFO_RUNTIME_VERSION = '0.2.89.2';
 
 const HUD_INFO_STYLE_MODES = new Set(['solid', 'simple']);
 const HUD_INFO_DATA_MODES = new Set(['default', 'advanced', 'dev']);
@@ -92,6 +92,7 @@ export function pageHudInfoBootstrap(initialSettings, pageWindow = globalThis) {
     startedAt: Date.now(),
     patchApplied: false,
     dataUpdates: 0,
+    peakScore: 0,
     lastSampleAt: 0,
     settings: normalizeHudInfoSettings(initialSettings),
     latest: {
@@ -163,6 +164,7 @@ export function pageHudInfoBootstrap(initialSettings, pageWindow = globalThis) {
   function exposeApi() {
     win.__BlobioHudInfoUpdate = updateFromGame;
     win.__BlobioHudInfoCells = updateCellsFromGame;
+    win.__BlobioHudInfoPeakScore = 0;
     win.__BlobioHudInfoBoosters = (boosters) => updateBoostersFromSource(boosters, 'game');
     win.__BlobioHudInfoSocketOpening = noteGameSocketOpening;
     win.__BlobioHudInfoSocketCreated = noteGameSocketCreated;
@@ -450,6 +452,10 @@ export function pageHudInfoBootstrap(initialSettings, pageWindow = globalThis) {
     const now = Date.now();
     const nextScore = Math.max(0, Math.round(Number(score) || 0));
     const nextFps = Math.max(0, Math.round(Number(fps) || 0));
+    if (nextScore > state.peakScore) {
+      state.peakScore = nextScore;
+      win.__BlobioHudInfoPeakScore = nextScore;
+    }
     state.dataUpdates += 1;
     state.latest.score = nextScore;
     state.latest.fps = nextFps;
@@ -470,6 +476,10 @@ export function pageHudInfoBootstrap(initialSettings, pageWindow = globalThis) {
     const count = Math.max(0, Math.round(Number(cells) || 0));
     if (state.latest.cells === count) {
       return;
+    }
+    if (count > 0 && state.latest.cells === 0) {
+      state.peakScore = 0;
+      win.__BlobioHudInfoPeakScore = 0;
     }
     state.latest.cells = count;
     state.latest.averageScore = hudInfoAverageMass(state.latest.score, count);
@@ -1027,6 +1037,7 @@ function cleanupExistingHudRuntime(win, doc) {
     delete win.__blobioHudInfoRefresh;
     delete win.__BlobioHudInfoDebug;
     delete win.BlobioHudInfoDebug;
+    delete win.__BlobioHudInfoPeakScore;
   } catch {
     win.__blobioHudInfoInstalled = false;
     win.__blobioHudInfoRuntimeVersion = '';

@@ -133,8 +133,7 @@ export const CHAT_ROLE_CSS = `
     -2px 0 0 #000,
      2px 0 0 #000,
      0 -2px 0 #000,
-     0 2px 0 #000,
-     0 0 7px rgba(0, 255, 0, 0.72) !important;
+     0 2px 0 #000 !important;
 }
 
 #chat .blobio-chat-friend-text:not(.blobio-extension-chat-tag):not(.blobio-chat-admin-username) {

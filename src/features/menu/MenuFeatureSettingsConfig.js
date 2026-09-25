@@ -14,6 +14,8 @@ export const EXTENSION_OPTION_TOOLTIPS = {
   hideAdminMd: 'FPS-Impact: Low[0-2]\nHide the built-in [MD] tag from extension ADMIN users in chat. This is enabled by default.',
   clanText: 'FPS-Impact: Low[0-2]\nControls extension clan tags behind the profile name and in-game chat names.',
   friendHighlight: 'FPS-Impact: Low[1-5]\nLoad accepted friends from Blobgame and color their chat name and message green. Friend requests and declined users are ignored.',
+  friendMinimapName: 'FPS-Impact: Low[1-3]\nDisplay accepted friends\' profile names and, in Both mode, their in-game names above the green minimap dots. Set each name color independently and optionally bracket each line.',
+  cellBorderSync: 'FPS-Impact: Low[1-2]\nMatches player cell borders to their skin colors. Cells without a readable skin keep their original borders.',
   fpsUncap: 'FPS-Impact: Medium[0-80]\nUnlocks the in-game frame rate after startup for smoother rendering and camera movement, especially on high-refresh-rate monitors. Includes safety handling and applies instantly. On weaker devices, this may lower FPS instead if the extra render load is too high.',
   liteMode: 'FPS-Gain: Low[5-20]\nAdds CSS containment and offscreen rendering hints to heavy sections and third-party iframe surfaces without hiding videos or promos.',
   noTransitions: 'FPS-Gain: Medium[10-35]\nRemoves CSS transitions and animations from menus, panels, toasts, and modals. Expected save: low to medium smoothness gain.\n[WARNING: This is disabled by default because it will drastically reduce HUD-options.]',

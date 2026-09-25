@@ -31,6 +31,8 @@ export function pageEmoteSkinBootstrap(initialConfig = {}, pageWindow = globalTh
     context: null,
     targetCanvas: null,
     frameSeen: false,
+    overlayFrame: -1,
+    viewport: { width: 0, height: 0 },
     patchedChunks: 0,
     seenCacheScripts: 0,
     wrappedCallback: false,
@@ -160,7 +162,8 @@ export function pageEmoteSkinBootstrap(initialConfig = {}, pageWindow = globalTh
   function beginFrame() {
     state.counters.beginFrames += 1;
     state.frameSeen = true;
-    expireEmotes();
+    state.overlayFrame = -1;
+    if (state.ownEmote || state.emotesByName.size) expireEmotes();
     if (!state.ownEmote && state.emotesByName.size === 0 && !state.overlayDirty) {
       return;
     }
@@ -178,6 +181,10 @@ export function pageEmoteSkinBootstrap(initialConfig = {}, pageWindow = globalTh
 
   function renderCell(cellId, rawName, centerX, centerY, cellSize, radius, isOwn, projectionMatrix) {
     state.counters.renderCalls += 1;
+    if (!state.ownEmote && state.emotesByName.size === 0) {
+      state.lastRender = null;
+      return false;
+    }
     const active = findActiveEmote(rawName, isOwn);
     if (!active || !ensureOverlay()) {
       state.lastRender = {
@@ -303,16 +310,7 @@ export function pageEmoteSkinBootstrap(initialConfig = {}, pageWindow = globalTh
   }
 
   function getOverlayViewport() {
-    const rect = state.targetCanvas?.getBoundingClientRect?.();
-    return {
-      width: Number(rect?.width) || parseCssPixels(state.overlay?.style?.width) || Number(win.innerWidth) || 0,
-      height: Number(rect?.height) || parseCssPixels(state.overlay?.style?.height) || Number(win.innerHeight) || 0,
-    };
-  }
-
-  function parseCssPixels(value) {
-    const number = Number.parseFloat(String(value || ''));
-    return Number.isFinite(number) ? number : 0;
+    return state.viewport;
   }
 
   function findActiveEmote(rawName, isOwn) {
@@ -359,6 +357,11 @@ export function pageEmoteSkinBootstrap(initialConfig = {}, pageWindow = globalTh
   }
 
   function ensureOverlay() {
+    // Geometry is shared by every emote in this frame; refresh it next frame.
+    if (state.overlayFrame === state.counters.beginFrames
+      && state.overlay?.parentNode && state.targetCanvas?.isConnected !== false) {
+      return true;
+    }
     const canvas = findTargetCanvas();
     if (!canvas) {
       return false;
@@ -378,6 +381,7 @@ export function pageEmoteSkinBootstrap(initialConfig = {}, pageWindow = globalTh
     }
 
     alignOverlay(canvas);
+    state.overlayFrame = state.counters.beginFrames;
     return true;
   }
 
@@ -411,6 +415,8 @@ export function pageEmoteSkinBootstrap(initialConfig = {}, pageWindow = globalTh
     const dpr = Math.max(1, Number(win.devicePixelRatio) || 1);
     const cssWidth = Math.max(1, Math.round(Number(rect.width) || Number(canvas.clientWidth) || 1));
     const cssHeight = Math.max(1, Math.round(Number(rect.height) || Number(canvas.clientHeight) || 1));
+    state.viewport.width = Number(rect.width) || cssWidth;
+    state.viewport.height = Number(rect.height) || cssHeight;
     const width = Math.round(cssWidth * dpr);
     const height = Math.round(cssHeight * dpr);
 

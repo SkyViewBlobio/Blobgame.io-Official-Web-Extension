@@ -117,7 +117,7 @@ export function normalizeVirusAlpha(value) {
   return Math.max(0, Math.min(1, Math.round(alpha * 100) / 100));
 }
 
-function normalizeVirusMotherCellSettings(settings) {
+export function normalizeVirusMotherCellSettings(settings) {
   return {
     enabled: Boolean(settings?.enabled),
     maskId: normalizeVirusMaskId(settings?.maskId),
@@ -127,10 +127,15 @@ function normalizeVirusMotherCellSettings(settings) {
   };
 }
 
-function chooseNewestSnapshot(...snapshots) {
-  return snapshots
-    .filter(Boolean)
-    .sort((left, right) => normalizeUpdatedAt(right.updatedAt) - normalizeUpdatedAt(left.updatedAt))[0] || null;
+function chooseNewestSnapshot(storedSnapshot, cookieSnapshot) {
+  if (!storedSnapshot) {
+    return cookieSnapshot;
+  }
+  if (!cookieSnapshot) {
+    return storedSnapshot;
+  }
+  return normalizeUpdatedAt(cookieSnapshot.updatedAt) > normalizeUpdatedAt(storedSnapshot.updatedAt)
+    ? cookieSnapshot : storedSnapshot;
 }
 
 function normalizeUpdatedAt(value) {

@@ -1,3 +1,5 @@
+import { readBooleanSetting } from '../storage/readBooleanSetting.js';
+
 export const HUD_INFO_KEYS = {
   enabled: 'blobio.chat.hudInfo.enabled',
   showFps: 'blobio.chat.hudInfo.showFps',
@@ -96,18 +98,6 @@ export const DEFAULT_HUD_INFO_SETTINGS = Object.freeze({
   alpha: 1,
 });
 
-function readBoolean(storage, key, fallback) {
-  try {
-    const value = storage?.getItem?.(key);
-    if (value === null || value === undefined || value === '') {
-      return fallback;
-    }
-    return value === '1' || String(value).toLowerCase() === 'true';
-  } catch {
-    return fallback;
-  }
-}
-
 function normalizeColor(value, fallback = DEFAULT_HUD_INFO_SETTINGS.color) {
   const color = String(value || '').trim().toLowerCase();
   return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
@@ -179,13 +169,13 @@ export function normalizeHudInfoSettings(settings = {}) {
 
 export function readHudInfoSettings(storage) {
   return normalizeHudInfoSettings({
-    enabled: readBoolean(storage, HUD_INFO_KEYS.enabled, DEFAULT_HUD_INFO_SETTINGS.enabled),
-    showFps: readBoolean(storage, HUD_INFO_KEYS.showFps, DEFAULT_HUD_INFO_SETTINGS.showFps),
-    showScore: readBoolean(storage, HUD_INFO_KEYS.showScore, DEFAULT_HUD_INFO_SETTINGS.showScore),
-    showMacro: readBoolean(storage, HUD_INFO_KEYS.showMacro, DEFAULT_HUD_INFO_SETTINGS.showMacro),
-    showCells: readBoolean(storage, HUD_INFO_KEYS.showCells, DEFAULT_HUD_INFO_SETTINGS.showCells),
-    showPing: readBoolean(storage, HUD_INFO_KEYS.showPing, DEFAULT_HUD_INFO_SETTINGS.showPing),
-    showBoosters: readBoolean(storage, HUD_INFO_KEYS.showBoosters, DEFAULT_HUD_INFO_SETTINGS.showBoosters),
+    enabled: readBooleanSetting(storage, HUD_INFO_KEYS.enabled, DEFAULT_HUD_INFO_SETTINGS.enabled),
+    showFps: readBooleanSetting(storage, HUD_INFO_KEYS.showFps, DEFAULT_HUD_INFO_SETTINGS.showFps),
+    showScore: readBooleanSetting(storage, HUD_INFO_KEYS.showScore, DEFAULT_HUD_INFO_SETTINGS.showScore),
+    showMacro: readBooleanSetting(storage, HUD_INFO_KEYS.showMacro, DEFAULT_HUD_INFO_SETTINGS.showMacro),
+    showCells: readBooleanSetting(storage, HUD_INFO_KEYS.showCells, DEFAULT_HUD_INFO_SETTINGS.showCells),
+    showPing: readBooleanSetting(storage, HUD_INFO_KEYS.showPing, DEFAULT_HUD_INFO_SETTINGS.showPing),
+    showBoosters: readBooleanSetting(storage, HUD_INFO_KEYS.showBoosters, DEFAULT_HUD_INFO_SETTINGS.showBoosters),
     positionMode: storage?.getItem?.(HUD_INFO_KEYS.positionMode),
     layoutMode: storage?.getItem?.(HUD_INFO_KEYS.layoutMode),
     styleMode: storage?.getItem?.(HUD_INFO_KEYS.styleMode),
@@ -194,7 +184,7 @@ export function readHudInfoSettings(storage) {
     pingMode: storage?.getItem?.(HUD_INFO_KEYS.pingMode),
     boosterNameMode: storage?.getItem?.(HUD_INFO_KEYS.boosterNameMode),
     boosterDurationMode: storage?.getItem?.(HUD_INFO_KEYS.boosterDurationMode),
-    boosterLastSecFlash: readBoolean(
+    boosterLastSecFlash: readBooleanSetting(
       storage,
       HUD_INFO_KEYS.boosterLastSecFlash,
       DEFAULT_HUD_INFO_SETTINGS.boosterLastSecFlash,

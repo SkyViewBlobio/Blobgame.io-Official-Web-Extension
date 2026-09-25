@@ -3,8 +3,17 @@ import {
   ANIMATION_SPEED_LIMITS,
   CHAT_FONT_SIZE_LIMITS,
 } from '../../settings/RuntimeSettings.js';
-import { HUD_INFO_FONT_LIMITS } from '../../settings/HudInfoSettings.js';
-import { UI_FONT_SIZE_LIMITS } from '../../settings/InGameUiSettings.js';
+import { KEYSTROKE_SIZE_LIMITS } from '../../settings/KeystrokeHudSettings.js';
+import {
+  HUD_INFO_BOOSTER_COLOR_MODES,
+  HUD_INFO_BOOSTER_DURATION_COLOR_MODES,
+  HUD_INFO_DATA_MODES,
+  HUD_INFO_FONT_LIMITS,
+  HUD_INFO_LAYOUT_MODES,
+  HUD_INFO_POSITION_MODES,
+  HUD_INFO_STYLE_MODES,
+} from '../../settings/HudInfoSettings.js';
+import { BLUR_LIMITS, UI_FONT_SIZE_LIMITS } from '../../settings/InGameUiSettings.js';
 
 export function createCategoryButton(document, label, category) {
   const button = document.createElement('button');
@@ -26,8 +35,11 @@ export function createChatCategory(document) {
 
   category.append(
     createFontSetting(document, 'chat', 'Font-Size', CHAT_FONT_SIZE_LIMITS),
-    createColorSetting(document, 'chat-background', 'Chat-BG-Color'),
-    createColorSetting(document, 'chat-outline', 'Chat-outline-Color'),
+    createColorSetting(document, 'chat-background', 'Chat-BG-Color', true),
+    createColorSetting(document, 'chat-slider', 'Slider Color'),
+    createColorSetting(document, 'chat-outline', 'Chat-outline-Color', true),
+    createColorSetting(document, 'chat-glow', 'Custom Glow', true),
+    createBlurSetting(document, 'chat-blur'),
     createBooleanSetting(document, 'smooth-chat', 'Smooth-Chat'),
   );
   return category;
@@ -47,8 +59,10 @@ export function createLeaderboardCategory(document) {
   category.dataset.category = 'leaderboard';
   category.append(
     createFontSetting(document, 'leaderboard', 'Font-Size', UI_FONT_SIZE_LIMITS),
-    createColorSetting(document, 'leaderboard-background', 'Leaderboard-BG-Color'),
-    createColorSetting(document, 'leaderboard-outline', 'Leaderboard-outline-Color'),
+    createColorSetting(document, 'leaderboard-background', 'Leaderboard-BG-Color', true),
+    createColorSetting(document, 'leaderboard-outline', 'Leaderboard-outline-Color', true),
+    createColorSetting(document, 'leaderboard-glow', 'Custom Glow', true),
+    createBlurSetting(document, 'leaderboard-blur'),
   );
   return category;
 }
@@ -58,6 +72,32 @@ export function createKeyShortcutsCategory(document) {
   category.classList.add('blobio-chat-settings-category', 'blobio-key-shortcuts-category');
   category.dataset.category = 'key-shortcuts';
   category.appendChild(createBooleanSetting(document, 'key-shortcuts', 'Disable the Key-Shortcut text on screen.'));
+  return category;
+}
+
+export function createBlurSetting(document, name) {
+  const group = createFontSetting(document, name, 'Blur', BLUR_LIMITS);
+  group.querySelector('input[type="range"]').setAttribute('aria-label', `${name} intensity`);
+  return group;
+}
+
+export function createKeystrokeHudCategory(document) {
+  const category = document.createElement('div');
+  category.classList.add('blobio-chat-settings-category', 'blobio-keystroke-category');
+  category.dataset.category = 'keystroke-hud';
+  category.append(
+    createBooleanSetting(document, 'keystroke-enabled', 'Keystroke-HUD'),
+    createBooleanSetting(document, 'keystroke-position-editor', 'Position-Editor'),
+    createHudModeSetting(document, 'keystroke-layout', 'Keystroke layout'),
+    createHudSizeSetting(document, 'keystroke-size', 'Size (%)', KEYSTROKE_SIZE_LIMITS),
+    createBlurSetting(document, 'keystroke-blur'),
+  );
+  for (const [name, label] of [['font', 'Font Color'], ['outline', 'Key Outline'], ['fill', 'Key Inner Color'], ['highlight', 'Pressed Highlight']]) {
+    const group = createHudBoosterColorSetting(document, `keystroke-${name}`, label);
+    group.querySelector('.blobio-ui-color-input').setAttribute('aria-label', `Keystroke ${label}`);
+    group.querySelector('.blobio-ui-alpha-range').setAttribute('aria-label', `Keystroke ${label} opacity`);
+    category.appendChild(group);
+  }
   return category;
 }
 
@@ -256,9 +296,9 @@ export function createHudInfoCategory(document) {
   category.append(
     createHudSection(document, 'HUD Display', [
       createBooleanSetting(document, 'hud-info-enabled', 'HUD-text on screen'),
-      createHudModeSetting(document, 'hud-position', 'Position'),
-      createHudModeSetting(document, 'hud-layout', 'Layout'),
-      createHudModeSetting(document, 'hud-style', 'Style'),
+      createHudChoiceSetting(document, 'hud-position', 'Position', HUD_INFO_POSITION_MODES),
+      createHudChoiceSetting(document, 'hud-layout', 'Layout', HUD_INFO_LAYOUT_MODES),
+      createHudChoiceSetting(document, 'hud-style', 'Style', HUD_INFO_STYLE_MODES),
     ]),
     createHudSection(document, 'Data Text', [
       createBooleanSetting(document, 'hud-info-fps', 'FPS'),
@@ -266,17 +306,17 @@ export function createHudInfoCategory(document) {
       createBooleanSetting(document, 'hud-info-cells', 'Cells'),
       createBooleanSetting(document, 'hud-info-macro', 'Macro'),
       createBooleanSetting(document, 'hud-info-ping', 'Ping'),
-      createHudModeSetting(document, 'hud-fps-mode', 'FPS mode'),
-      createHudModeSetting(document, 'hud-score-mode', 'Score mode'),
-      createHudModeSetting(document, 'hud-ping-mode', 'Ping mode'),
+      createHudChoiceSetting(document, 'hud-fps-mode', 'FPS mode', HUD_INFO_DATA_MODES),
+      createHudChoiceSetting(document, 'hud-score-mode', 'Score mode', HUD_INFO_DATA_MODES),
+      createHudChoiceSetting(document, 'hud-ping-mode', 'Ping mode', HUD_INFO_DATA_MODES),
     ]),
     createHudSection(document, 'Booster Info', [
       createBooleanSetting(document, 'hud-info-boosters', 'Booster-Info'),
-      createHudModeSetting(document, 'hud-booster-name-mode', 'Booster type color'),
+      createHudChoiceSetting(document, 'hud-booster-name-mode', 'Booster type color', HUD_INFO_BOOSTER_COLOR_MODES),
       createHudBoosterColorSetting(document, 'hud-booster-merge-color', 'Merge'),
       createHudBoosterColorSetting(document, 'hud-booster-speed-color', 'Speed'),
       createHudBoosterColorSetting(document, 'hud-booster-virus-color', 'VIRUS'),
-      createHudModeSetting(document, 'hud-booster-duration-mode', 'Booster duration color'),
+      createHudChoiceSetting(document, 'hud-booster-duration-mode', 'Booster duration color', HUD_INFO_BOOSTER_DURATION_COLOR_MODES),
       createBooleanSetting(document, 'hud-booster-last-sec-flash', 'Last-Sec-Flash'),
     ]),
     createHudSection(document, 'Style', [
@@ -352,7 +392,7 @@ export function createBooleanSetting(document, name, labelText) {
   return group;
 }
 
-export function createColorSetting(document, name, labelText) {
+export function createColorSetting(document, name, labelText, gradient = false) {
   const group = document.createElement('div');
   group.classList.add('blobio-ui-setting-group', 'blobio-ui-color-setting');
   group.dataset.setting = name;
@@ -391,7 +431,74 @@ export function createColorSetting(document, name, labelText) {
 
   controls.append(wheel, alpha, alphaValue);
   group.append(toggle, label, controls);
+  if (gradient) {
+    const modes = document.createElement('div');
+    modes.className = 'blobio-background-modes';
+    const mode = document.createElement('button');
+    mode.type = 'button';
+    mode.className = 'blobio-hud-mode-button blobio-background-mode';
+    mode.setAttribute('aria-label', labelText + ' mode');
+    const secondaryWheel = wheel.cloneNode(true);
+    secondaryWheel.classList.add('blobio-gradient-control');
+    const secondary = secondaryWheel.querySelector('input');
+    secondary.className = 'blobio-ui-color-input blobio-secondary-color';
+    secondary.setAttribute('aria-label', labelText + ' second color');
+    const angle = document.createElement('input');
+    angle.type = 'range';
+    angle.min = '0';
+    angle.max = '360';
+    angle.step = '1';
+    angle.className = 'blobio-themed-range blobio-gradient-angle blobio-gradient-control';
+    angle.setAttribute('aria-label', labelText + ' gradient angle');
+    const value = document.createElement('span');
+    value.className = 'blobio-gradient-value blobio-gradient-control';
+    modes.append(mode, secondaryWheel, angle, value);
+    group.appendChild(modes);
+    const alphaControls = document.createElement('label');
+    alphaControls.className = 'blobio-gradient-alpha-controls blobio-gradient-control';
+    const alphaLabel = document.createElement('span');
+    alphaLabel.textContent = 'Second color opacity';
+    const secondaryAlpha = alpha.cloneNode(true);
+    secondaryAlpha.className = 'blobio-themed-range blobio-secondary-alpha';
+    secondaryAlpha.setAttribute('aria-label', `${labelText} second color opacity`);
+    const secondaryAlphaValue = document.createElement('span');
+    secondaryAlphaValue.className = 'blobio-ui-alpha-value blobio-secondary-alpha-value';
+    alphaControls.append(alphaLabel, secondaryAlpha, secondaryAlphaValue);
+    group.appendChild(alphaControls);
+  }
+  if (name.endsWith('-outline')) {
+    const glowControls = document.createElement('label');
+    glowControls.className = 'blobio-outline-glow-controls';
+    const glowLabel = document.createElement('span');
+    glowLabel.textContent = 'Glow intensity';
+    const glow = document.createElement('input');
+    glow.type = 'range';
+    glow.min = '0';
+    glow.max = '1';
+    glow.step = '0.01';
+    glow.className = 'blobio-themed-range blobio-outline-glow-range';
+    glow.setAttribute('aria-label', `${labelText} glow intensity`);
+    const value = document.createElement('span');
+    value.className = 'blobio-ui-alpha-value blobio-outline-glow-value';
+    glowControls.append(glowLabel, glow, value);
+    group.appendChild(glowControls);
+  }
   return group;
+}
+
+export function createMinimapCategory(document) {
+  const category = document.createElement('div');
+  category.classList.add('blobio-chat-settings-category', 'blobio-minimap-category');
+  category.dataset.category = 'minimap';
+  category.append(
+    createColorSetting(document, 'minimap-background', 'Minimap-BG-Color', true),
+    createColorSetting(document, 'minimap-outline', 'Minimap Outline', true),
+    createColorSetting(document, 'minimap-glow', 'Custom Glow', true),
+    createColorSetting(document, 'minimap-grid', 'Sector Lines'),
+    createColorSetting(document, 'minimap-font', 'Sector Labels'),
+    createBlurSetting(document, 'minimap-blur'),
+  );
+  return category;
 }
 
 export function createHudModeSetting(document, name, labelText) {
@@ -412,14 +519,40 @@ export function createHudModeSetting(document, name, labelText) {
   return group;
 }
 
-export function createHudSizeSetting(document) {
+function createHudChoiceSetting(document, name, labelText, options) {
   const group = document.createElement('div');
-  group.classList.add('blobio-ui-setting-group', 'blobio-hud-size-setting');
-  group.dataset.setting = 'hud-font-size';
+  group.classList.add('blobio-ui-setting-group', 'blobio-hud-mode-setting');
+  group.dataset.setting = name;
 
   const label = document.createElement('div');
   label.classList.add('blobio-chat-font-label');
-  label.textContent = 'HUD Font-Size';
+  label.textContent = labelText;
+
+  const choices = document.createElement('div');
+  choices.classList.add('blobio-hud-mode-choices');
+  choices.dataset.count = String(options.length);
+  choices.setAttribute('role', 'group');
+  choices.setAttribute('aria-label', labelText);
+  for (const [value, text] of options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.mode = value;
+    button.textContent = text;
+    choices.appendChild(button);
+  }
+
+  group.append(label, choices);
+  return group;
+}
+
+export function createHudSizeSetting(document, name = 'hud-font-size', labelText = 'HUD Font-Size', limits = HUD_INFO_FONT_LIMITS) {
+  const group = document.createElement('div');
+  group.classList.add('blobio-ui-setting-group', 'blobio-hud-size-setting');
+  group.dataset.setting = name;
+
+  const label = document.createElement('div');
+  label.classList.add('blobio-chat-font-label');
+  label.textContent = labelText;
 
   const controls = document.createElement('div');
   controls.classList.add('blobio-chat-font-controls');
@@ -427,17 +560,18 @@ export function createHudSizeSetting(document) {
   const range = document.createElement('input');
   range.type = 'range';
   range.classList.add('blobio-chat-font-range', 'blobio-themed-range');
-  range.min = String(HUD_INFO_FONT_LIMITS.min);
-  range.max = String(HUD_INFO_FONT_LIMITS.max);
+  range.min = String(limits.min);
+  range.max = String(limits.max);
   range.step = '1';
 
   const number = document.createElement('input');
   number.type = 'number';
   number.classList.add('blobio-chat-font-number');
-  number.min = String(HUD_INFO_FONT_LIMITS.min);
-  number.max = String(HUD_INFO_FONT_LIMITS.max);
+  number.min = String(limits.min);
+  number.max = String(limits.max);
   number.step = '1';
-  number.setAttribute('aria-label', 'HUD font size');
+  range.setAttribute('aria-label', name === 'hud-font-size' ? 'HUD font size' : 'Keystroke size');
+  number.setAttribute('aria-label', name === 'hud-font-size' ? 'HUD font size' : 'Keystroke size');
 
   controls.append(range, number);
   group.append(label, controls);

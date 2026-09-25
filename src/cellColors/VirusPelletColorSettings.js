@@ -135,10 +135,15 @@ function normalizeAngle(value, fallback) {
   return Math.max(0, Math.min(360, Math.round(angle)));
 }
 
-function chooseNewestSnapshot(...snapshots) {
-  return snapshots
-    .filter(Boolean)
-    .sort((left, right) => normalizeUpdatedAt(right.updatedAt) - normalizeUpdatedAt(left.updatedAt))[0] || null;
+function chooseNewestSnapshot(storedSnapshot, cookieSnapshot) {
+  if (!storedSnapshot) {
+    return cookieSnapshot;
+  }
+  if (!cookieSnapshot) {
+    return storedSnapshot;
+  }
+  return normalizeUpdatedAt(cookieSnapshot.updatedAt) > normalizeUpdatedAt(storedSnapshot.updatedAt)
+    ? cookieSnapshot : storedSnapshot;
 }
 
 function normalizeUpdatedAt(value) {
